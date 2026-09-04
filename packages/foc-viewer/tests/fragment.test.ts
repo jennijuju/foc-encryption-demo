@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildFragment, parseFragment } from '../src/fragment.js'
+import { parseFragment } from '../src/fragment.js'
 
 const CID = 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3udhvy6o2x4i5woy4vgr3vnz4'
 
@@ -24,12 +24,3 @@ describe('parseFragment', () => {
   })
 })
 
-describe('buildFragment', () => {
-  it('serializes only the encrypted Root CID', () => {
-    expect(buildFragment({ cid: CID })).toBe(`#cid=${CID}`)
-  })
-
-  it('rejects an invalid encrypted Root CID', () => {
-    expect(() => buildFragment({ cid: '../../etc/passwd' })).toThrow('Invalid encrypted Root CID')
-  })
-})

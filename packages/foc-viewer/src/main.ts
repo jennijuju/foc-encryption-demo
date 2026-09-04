@@ -1,8 +1,13 @@
-import { MAX_BINARY_PREVIEW_BYTES, MAX_DOCUMENT_PREVIEW_BYTES, readInlineEntry } from './decrypt.js'
+import {
+  MAX_BINARY_PREVIEW_BYTES,
+  MAX_DOCUMENT_PREVIEW_BYTES,
+  readEntryPrefix,
+  readInlineEntry,
+} from './decrypt.js'
 import { parseFragment } from './fragment.js'
 import type { ProtectedArchive, ProtectedEntry } from './protected-archive.js'
 import { openProtectedArchive } from './protected-archive.js'
-import { detectContentType, renderContent, renderProgressiveMedia } from './render.js'
+import { detectContentType, isBinaryPreviewType, renderContent } from './render.js'
 import { saveEntry } from './save.js'
 import { showAccessKeyPrompt, showMissingLink, showProtectedArchive, showSaveEntry } from './ui.js'
 
@@ -15,48 +20,60 @@ function getContainer(): HTMLElement {
 const container = getContainer()
 let activeArchive: ProtectedArchive | undefined
 
-function previewLimit(contentType: string): number {
-  if (contentType === 'text/html' || contentType === 'text/plain') return MAX_DOCUMENT_PREVIEW_BYTES
-  if (
-    contentType.startsWith('image/') ||
-    contentType.startsWith('audio/') ||
-    contentType.startsWith('video/') ||
-    contentType === 'application/pdf'
-  ) {
-    return MAX_BINARY_PREVIEW_BYTES
-  }
-  return MAX_DOCUMENT_PREVIEW_BYTES
+
+async function closeArchive(archive: ProtectedArchive): Promise<void> {
+  if (activeArchive === archive) activeArchive = undefined
+  await archive.close()
 }
 
-async function openAndRender(archive: ProtectedArchive, entry: ProtectedEntry): Promise<void> {
+async function openAndRender(
+  archive: ProtectedArchive,
+  entry: ProtectedEntry,
+  closeAfterOpen = false
+): Promise<void> {
   if (entry.directory) return
-  const limit = previewLimit(entry.contentType)
-  if (entry.size <= limit) {
-    const data = await readInlineEntry(await archive.open(entry.path), entry.size, limit)
-    renderContent(container, data, await detectContentType(data))
-    return
-  }
+  try {
+    if (entry.size <= MAX_DOCUMENT_PREVIEW_BYTES) {
+      const data = await readInlineEntry(
+        await archive.open(entry.path),
+        entry.size,
+        MAX_DOCUMENT_PREVIEW_BYTES
+      )
+      renderContent(container, data, await detectContentType(data))
+      if (closeAfterOpen) await closeArchive(archive)
+      return
+    }
 
-  const media = entry.contentType.startsWith('audio/') || entry.contentType.startsWith('video/')
-  if (media) {
-    const rendered = await renderProgressiveMedia(container, entry.contentType, () => archive.open(entry.path))
-    if (rendered) return
-  }
+    if (entry.size <= MAX_BINARY_PREVIEW_BYTES) {
+      const detectedType = await detectContentType(await readEntryPrefix(await archive.open(entry.path)))
+      if (isBinaryPreviewType(detectedType)) {
+        const data = await readInlineEntry(
+          await archive.open(entry.path),
+          entry.size,
+          MAX_BINARY_PREVIEW_BYTES
+        )
+        renderContent(container, data, detectedType)
+        if (closeAfterOpen) await closeArchive(archive)
+        return
+      }
+    }
 
-  showSaveEntry(
-    container,
-    entry,
-    () =>
-      saveEntry(
+    showSaveEntry(container, entry, async () => {
+      const result = await saveEntry(
         {
           size: entry.size,
           contentType: entry.contentType,
           open: () => archive.open(entry.path),
         },
         entry.path.split('/').at(-1) ?? 'decrypted-content'
-      ),
-    media
-  )
+      )
+      if (result === 'saved' && closeAfterOpen) await closeArchive(archive)
+      return result
+    })
+  } catch (error) {
+    if (closeAfterOpen) await closeArchive(archive)
+    throw error
+  }
 }
 
 async function unlockArchive(cid: string, accessKey: string): Promise<void> {
@@ -65,7 +82,7 @@ async function unlockArchive(cid: string, accessKey: string): Promise<void> {
   activeArchive = archive
   const entries = archive.list()
   if (entries.length === 1 && !entries[0].directory) {
-    await openAndRender(archive, entries[0])
+    await openAndRender(archive, entries[0], true)
     return
   }
   showProtectedArchive(container, entries, (entry) => openAndRender(archive, entry))

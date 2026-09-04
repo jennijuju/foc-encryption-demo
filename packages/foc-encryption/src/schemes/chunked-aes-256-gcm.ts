@@ -3,7 +3,7 @@ import { aesGcmDecrypt, aesGcmEncrypt, getRandomValues } from '../crypto.js'
 import { AuthenticationError, FocEncryptionError, MalformedEnvelopeError } from '../errors.js'
 import type { DecryptMetadata, EncStructureContext, EncryptResult, EncryptionScheme } from './scheme.js'
 
-const BASE_NONCE_LENGTH = 7
+const BASE_NONCE_LENGTH = 12
 const AES_GCM_TAG_LENGTH = 16
 const DEFAULT_CHUNK_SIZE = 262144 // 256 KiB
 const MIN_CHUNK_SIZE = 4096 // 4 KiB
@@ -12,6 +12,7 @@ const MAX_CHUNK_INDEX = 0xffffffff // 4-byte counter max
 
 export interface ChunkedEncryptParams {
   chunkSize?: number
+  objectNonce?: Uint8Array
 }
 
 export class ChunkedAes256GcmStream implements EncryptionScheme {
@@ -20,6 +21,7 @@ export class ChunkedAes256GcmStream implements EncryptionScheme {
   readonly isSeekable = true
 
   private chunkSize: number
+  private objectNonce?: Uint8Array
 
   constructor(params?: ChunkedEncryptParams) {
     const chunkSize = params?.chunkSize ?? DEFAULT_CHUNK_SIZE
@@ -28,6 +30,10 @@ export class ChunkedAes256GcmStream implements EncryptionScheme {
         `Chunk size must be a positive safe integer no larger than ${MAX_CHUNK_SIZE}, got ${chunkSize}`
       )
     }
+    if (params?.objectNonce && params.objectNonce.length !== BASE_NONCE_LENGTH) {
+      throw new FocEncryptionError(`Object nonce must be ${BASE_NONCE_LENGTH} bytes`)
+    }
+    this.objectNonce = params?.objectNonce ? Uint8Array.from(params.objectNonce) : undefined
     this.chunkSize = chunkSize
   }
 
@@ -41,7 +47,9 @@ export class ChunkedAes256GcmStream implements EncryptionScheme {
         `Plaintext too large: ${chunkCount} chunks exceeds the 4-byte counter maximum (${MAX_CHUNK_INDEX + 1})`
       )
     }
-    return { iv: getRandomValues(BASE_NONCE_LENGTH), chunkCount }
+    const iv = this.objectNonce ? Uint8Array.from(this.objectNonce) : getRandomValues(BASE_NONCE_LENGTH)
+    this.objectNonce = undefined
+    return { iv, chunkCount }
   }
 
   async encrypt(
@@ -59,8 +67,8 @@ export class ChunkedAes256GcmStream implements EncryptionScheme {
       const end = isLast ? plaintext.length : start + this.chunkSize
       const chunk = plaintext.subarray(start, end)
 
-      const nonce = deriveChunkNonce(baseNonce, i, isLast)
-      const aad = buildEncStructure(context, protectedHeaders, new Uint8Array(0))
+      const nonce = deriveChunkNonce(i)
+      const aad = buildEncStructure(context, protectedHeaders, new Uint8Array([isLast ? 1 : 0]))
       const encrypted = await aesGcmEncrypt(key, nonce, chunk, aad)
       chunks.push(encrypted)
     }
@@ -96,7 +104,6 @@ export class ChunkedAes256GcmStream implements EncryptionScheme {
   } {
     const { iv, chunkCount } = this.createEncryptionMetadata(plaintextLength)
     const reader = plaintext.getReader()
-    const aad = buildEncStructure(context, protectedHeaders, new Uint8Array(0))
     let sourceChunk: Uint8Array | undefined
     let sourceOffset = 0
     let chunkIndex = 0
@@ -178,7 +185,8 @@ export class ChunkedAes256GcmStream implements EncryptionScheme {
           try {
             chunk = await readPlaintextChunk(chunkLength)
             if (isLast) await requireSourceEnd()
-            const nonce = deriveChunkNonce(iv, chunkIndex, isLast)
+            const nonce = deriveChunkNonce(chunkIndex)
+            const aad = buildEncStructure(context, protectedHeaders, new Uint8Array([isLast ? 1 : 0]))
             const encrypted = await aesGcmEncrypt(key, nonce, chunk, aad)
             controller.enqueue(encrypted)
             chunkIndex += 1
@@ -223,8 +231,8 @@ export class ChunkedAes256GcmStream implements EncryptionScheme {
       const end = isLast ? ciphertext.length : start + ciphertextChunkSize
       const chunkCt = ciphertext.subarray(start, end)
 
-      const nonce = deriveChunkNonce(iv, i, isLast)
-      const aad = buildEncStructure(context, protectedHeaders, new Uint8Array(0))
+      const nonce = deriveChunkNonce(i)
+      const aad = buildEncStructure(context, protectedHeaders, new Uint8Array([isLast ? 1 : 0]))
       try {
         const decrypted = await aesGcmDecrypt(key, nonce, chunkCt, aad)
         plaintextChunks.push(decrypted)
@@ -277,8 +285,8 @@ export class ChunkedAes256GcmStream implements EncryptionScheme {
       const ctEnd = isLast ? ciphertext.length : ctStart + ciphertextChunkSize
       const chunkCt = ciphertext.subarray(ctStart, ctEnd)
 
-      const nonce = deriveChunkNonce(iv, globalIndex, isLast)
-      const aad = buildEncStructure(context, protectedHeaders, new Uint8Array(0))
+      const nonce = deriveChunkNonce(globalIndex)
+      const aad = buildEncStructure(context, protectedHeaders, new Uint8Array([isLast ? 1 : 0]))
       try {
         const decrypted = await aesGcmDecrypt(key, nonce, chunkCt, aad)
         plaintextChunks.push(decrypted)
@@ -302,22 +310,16 @@ export class ChunkedAes256GcmStream implements EncryptionScheme {
   }
 }
 
-/**
- * Derive per-chunk nonce:
- * nonce[0..6]  = base_nonce[0..6]
- * nonce[7..10] = chunk_index (4 bytes, big-endian)
- * nonce[11]    = last_flag (0x00 or 0x01)
- */
-function deriveChunkNonce(baseNonce: Uint8Array, chunkIndex: number, isLast: boolean): Uint8Array {
-  const nonce = new Uint8Array(12)
-  nonce.set(baseNonce.subarray(0, BASE_NONCE_LENGTH), 0)
-  // 4-byte big-endian chunk index at positions 7-10
-  nonce[7] = (chunkIndex >>> 24) & 0xff
-  nonce[8] = (chunkIndex >>> 16) & 0xff
-  nonce[9] = (chunkIndex >>> 8) & 0xff
-  nonce[10] = chunkIndex & 0xff
-  // last flag at position 11
-  nonce[11] = isLast ? 0x01 : 0x00
+/** Derive a per-chunk nonce from its unsigned 32-bit index. */
+function deriveChunkNonce(chunkIndex: number): Uint8Array {
+  if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0 || chunkIndex > MAX_CHUNK_INDEX) {
+    throw new MalformedEnvelopeError('Chunk index must fit in an unsigned 32-bit integer')
+  }
+  const nonce = new Uint8Array(BASE_NONCE_LENGTH)
+  nonce[8] = (chunkIndex >>> 24) & 0xff
+  nonce[9] = (chunkIndex >>> 16) & 0xff
+  nonce[10] = (chunkIndex >>> 8) & 0xff
+  nonce[11] = chunkIndex & 0xff
   return nonce
 }
 

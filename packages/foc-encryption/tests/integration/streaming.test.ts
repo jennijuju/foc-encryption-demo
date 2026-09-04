@@ -109,6 +109,17 @@ async function expectBoundedEncryption(plaintextLength: number): Promise<void> {
 }
 
 describe('encryptStream', () => {
+  it('rejects a non-chunked runtime algorithm from JavaScript callers', async () => {
+    const options = {
+      algorithm: CoseAlgorithm.AES_256_GCM,
+      plaintextLength: 0,
+    } as unknown as StreamEncryptOptions
+
+    await expect(encryptStream(streamFromChunks([]), new Uint8Array(32).fill(1), options)).rejects.toThrow(
+      /unsupported|chunked/i
+    )
+  })
+
   it('re-chunks uneven input and remains compatible with whole-file and cross-chunk decryption', async () => {
     const chunks = [new Uint8Array([1, 2, 3]), new Uint8Array(300_000).fill(7), new Uint8Array([8, 9])]
     const expected = concatenate(chunks)

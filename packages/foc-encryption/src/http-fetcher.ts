@@ -53,7 +53,7 @@ export function createHttpBlobFetcher(url: string, fetchFn: typeof fetch = fetch
     if (totalSize !== undefined && offset >= totalSize) return new Uint8Array()
     const end = totalSize === undefined ? requestedEnd : Math.min(requestedEnd, totalSize - 1)
 
-    const response = await fetchFn(url, { headers: { Range: `bytes=${offset}-${end}` } })
+    const response = await fetchFn(url, { headers: { Range: `bytes=${offset}-${end}` }, redirect: 'error' })
     if (response.status !== 206) {
       throw new Error('Gateway does not support byte-range retrieval')
     }

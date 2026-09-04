@@ -16,10 +16,3 @@ export function parseFragment(hash: string): FragmentParams | null {
   return CID_PATTERN.test(cid) ? { cid } : null
 }
 
-/** Build a password-free URL fragment for an encrypted Root CID. */
-export function buildFragment({ cid }: FragmentParams): string {
-  if (!CID_PATTERN.test(cid)) {
-    throw new Error('Invalid encrypted Root CID')
-  }
-  return `#cid=${cid}`
-}

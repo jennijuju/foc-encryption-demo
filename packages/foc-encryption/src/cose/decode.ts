@@ -37,9 +37,13 @@ export interface DecodedEnvelope {
 export function decodeCoseEnvelope(blob: Uint8Array): DecodedEnvelope {
   let decoded: unknown
   let remainder: Uint8Array
+  const prefix = blob.subarray(0, Math.min(blob.length, MAX_ENVELOPE_SIZE + 1))
   try {
-    ;[decoded, remainder] = decodeFirst(blob, coseDecodeOptions)
+    ;[decoded, remainder] = decodeFirst(prefix, coseDecodeOptions)
   } catch (err) {
+    if (blob.length > MAX_ENVELOPE_SIZE) {
+      throw new MalformedEnvelopeError('FEE envelope is too large', { cause: err })
+    }
     throw new MalformedEnvelopeError('Failed to decode COSE envelope: invalid CBOR', { cause: err })
   }
 
@@ -71,7 +75,7 @@ export function decodeCoseEnvelope(blob: Uint8Array): DecodedEnvelope {
   }
   let protectedMap: unknown
   try {
-    protectedMap = decode(protectedBytes, { useMaps: true })
+    protectedMap = decode(protectedBytes, { useMaps: true, rejectDuplicateMapKeys: true })
   } catch (err) {
     throw new MalformedEnvelopeError('Failed to decode protected headers', { cause: err })
   }
@@ -97,8 +101,8 @@ export function decodeCoseEnvelope(blob: Uint8Array): DecodedEnvelope {
   }
 
   const iv = unprotectedMap.get(COSE_HEADER_IV)
-  if (!(iv instanceof Uint8Array)) {
-    throw new MalformedEnvelopeError('Missing or invalid IV in unprotected headers')
+  if (!(iv instanceof Uint8Array) || iv.length !== 12) {
+    throw new MalformedEnvelopeError('Missing or invalid 12-byte IV in unprotected headers')
   }
   const chunkSize = protectedMap.get(CoseHeaderParam.CHUNK_SIZE)
   if (chunkSize !== undefined && typeof chunkSize !== 'number') {
@@ -136,7 +140,7 @@ export function decodeCoseEnvelope(blob: Uint8Array): DecodedEnvelope {
     }
   }
 
-  const envelopeSize = blob.length - remainder.length
+  const envelopeSize = prefix.length - remainder.length
   if (envelopeSize > MAX_ENVELOPE_SIZE) {
     throw new MalformedEnvelopeError('FEE envelope is too large')
   }

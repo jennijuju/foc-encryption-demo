@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { link, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { assertPathWithinRoot, collectArchiveEntries, validateArchivePath, writeZip } from '../../src/protect.js'
+import {
+  assertPathWithinRoot,
+  assertProtectedZipSize,
+  collectArchiveEntries,
+  validateArchivePath,
+  writeZip,
+} from '../../src/protect.js'
 
 describe('protected archive paths', () => {
   let tempDir: string
@@ -54,6 +60,19 @@ describe('protected archive paths', () => {
   it('rejects a resolved path outside the selected root', () => {
     const root = resolve(tempDir, 'selected')
     expect(() => assertPathWithinRoot(root, resolve(tempDir, 'outside.txt'))).toThrow('outside the selected root')
+  })
+
+  it('requires the ZIP plus overhead to remain below 1000 MiB', () => {
+    expect(() => assertProtectedZipSize(1_048_575_999)).not.toThrow()
+    expect(() => assertProtectedZipSize(1_048_576_000)).toThrow('below 1000 MiB')
+  })
+
+  it('rejects files with hard-link aliases', async () => {
+    const input = join(tempDir, 'source.txt')
+    await writeFile(input, 'secret bytes')
+    await link(input, join(tempDir, 'alias.txt'))
+
+    await expect(collectArchiveEntries(input)).rejects.toThrow('Hard-linked files are not allowed')
   })
 
   it('rejects input and nested symlinks', async () => {

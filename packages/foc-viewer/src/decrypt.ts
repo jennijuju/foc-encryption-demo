@@ -34,3 +34,26 @@ export async function readInlineEntry(
   }
   return output
 }
+
+export async function readEntryPrefix(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes = 100
+): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error('Invalid prefix size')
+  const output = new Uint8Array(maxBytes)
+  const reader = stream.getReader()
+  let offset = 0
+  try {
+    while (offset < maxBytes) {
+      const { done, value } = await reader.read()
+      if (done) return output.slice(0, offset)
+      const length = Math.min(value.length, maxBytes - offset)
+      output.set(value.subarray(0, length), offset)
+      offset += length
+    }
+    return output
+  } finally {
+    await reader.cancel().catch(() => undefined)
+    reader.releaseLock()
+  }
+}

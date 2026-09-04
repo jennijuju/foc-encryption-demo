@@ -1,5 +1,6 @@
 import { Tagged, decode, decodeFirst, encode } from 'cborg'
 import { describe, expect, it } from 'vitest'
+import { encodeCoseEncrypt0, getProtectedHeaderBytes } from '../../src/cose/encode.js'
 import { CoseAlgorithm } from '../../src/cose/headers.js'
 import { encrypt, parseEnvelope } from '../../src/envelope.js'
 import type { BlobFetcher } from '../../src/types.js'
@@ -143,6 +144,25 @@ describe('FEE v1 wire profile', () => {
     }
   })
 
+  it('rejects duplicate protected-map labels', () => {
+    const protectedHeaders = encode(
+      new Map<number, unknown>([
+        [1, 3],
+        [16, 'application/vnd.filecoin-encryption+cose'],
+        [-65794, 1],
+      ])
+    )
+    protectedHeaders[0] = 0xa4
+    const duplicateHeaders = new Uint8Array(protectedHeaders.length + 2)
+    duplicateHeaders.set(protectedHeaders)
+    duplicateHeaders.set([0x01, 0x03], protectedHeaders.length)
+    const envelope = encode(new Tagged(16, [duplicateHeaders, new Map([[5, new Uint8Array(12)]]), null]))
+    const blob = new Uint8Array(envelope.length + 16)
+    blob.set(envelope)
+
+    expect(() => parseEnvelope(blob)).toThrow(/protected headers/i)
+  })
+
   it('rejects an encoded envelope larger than one MiB', () => {
     const protectedHeaders = encode(
       new Map<number, unknown>([
@@ -157,6 +177,31 @@ describe('FEE v1 wire profile', () => {
     blob.set(envelope)
 
     expect(() => parseEnvelope(blob)).toThrow(/(?:metadata|envelope).*large/i)
+  })
+
+  it('refuses a complete COSE envelope above one MiB even when protected headers fit', () => {
+    let low = 0
+    let high = 64 * 1024
+    while (low < high) {
+      const candidate = Math.ceil((low + high) / 2)
+      const appMetadata = Object.fromEntries(
+        Array.from({ length: 16 }, (_, index) => [`value-${index}`, 'x'.repeat(candidate)])
+      )
+      try {
+        getProtectedHeaderBytes(CoseAlgorithm.AES_256_GCM, { appMetadata })
+        low = candidate
+      } catch {
+        high = candidate - 1
+      }
+    }
+    const appMetadata = Object.fromEntries(
+      Array.from({ length: 16 }, (_, index) => [`value-${index}`, 'x'.repeat(low)])
+    )
+
+    expect(getProtectedHeaderBytes(CoseAlgorithm.AES_256_GCM, { appMetadata }).length).toBeLessThanOrEqual(1024 * 1024)
+    expect(() => encodeCoseEncrypt0(CoseAlgorithm.AES_256_GCM, new Uint8Array(12), { appMetadata })).toThrow(
+      /envelope is too large/i
+    )
   })
 
   it('refuses to emit an envelope outside the profile bounds', async () => {

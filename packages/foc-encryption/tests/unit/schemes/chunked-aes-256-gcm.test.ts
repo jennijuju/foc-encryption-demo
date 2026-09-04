@@ -25,12 +25,12 @@ describe('ChunkedAes256GcmStream scheme', () => {
 
     expect(result.chunkCount).toBe(4) // ceil(50/16) = 4
     expect(result.chunkSize).toBe(16)
-    expect(result.iv.length).toBe(7)
+    expect(result.iv.length).toBe(12)
     // Each chunk is chunkSize + 16 tag, except last which is (50 - 48) + 16 = 18
     expect(result.ciphertext.length).toBe(3 * (16 + 16) + (2 + 16))
   })
 
-  it('generates 7-byte base nonce (IV)', async () => {
+  it('generates a 12-byte random base nonce', async () => {
     const scheme = new ChunkedAes256GcmStream({ chunkSize: 32 })
     const rawKey = crypto.getRandomValues(new Uint8Array(32))
     const key = await importAesGcmKey(rawKey)
@@ -39,7 +39,7 @@ describe('ChunkedAes256GcmStream scheme', () => {
 
     const result = await scheme.encrypt(key, plaintext, protectedHeaders, 'Encrypt0')
 
-    expect(result.iv.length).toBe(7)
+    expect(result.iv.length).toBe(12)
   })
 
   it('full decrypt round-trip', async () => {
@@ -76,38 +76,37 @@ describe('ChunkedAes256GcmStream scheme', () => {
       })
     ).rejects.toThrow(AuthenticationError)
   })
+
+  it('authenticates the final-chunk marker against truncation', async () => {
+    const scheme = new ChunkedAes256GcmStream({ chunkSize: 16 })
+    const key = await importAesGcmKey(crypto.getRandomValues(new Uint8Array(32)))
+    const protectedHeaders = cborg.encode(new Map([[COSE_HEADER_ALG, -65793]]))
+    const encrypted = await scheme.encrypt(key, new Uint8Array(32), protectedHeaders, 'Encrypt0')
+    const firstCiphertextChunk = encrypted.ciphertext.slice(0, 32)
+
+    await expect(
+      scheme.decrypt(key, firstCiphertextChunk, encrypted.iv, protectedHeaders, 'Encrypt0', {
+        chunkSize: 16,
+        chunkCount: 1,
+      })
+    ).rejects.toThrow(AuthenticationError)
+  })
 })
 
 describe('deriveChunkNonce', () => {
-  it('produces 12-byte nonce with base_nonce + counter + last_flag', () => {
-    const baseNonce = new Uint8Array([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07])
-    const nonce = deriveChunkNonce(baseNonce, 0, false)
-
-    expect(nonce.length).toBe(12)
-    expect(nonce.slice(0, 7)).toEqual(baseNonce)
-    expect(nonce.slice(7, 11)).toEqual(new Uint8Array([0, 0, 0, 0]))
-    expect(nonce[11]).toBe(0x00)
+  it('encodes chunk zero as an all-zero 96-bit nonce', () => {
+    expect(deriveChunkNonce(0)).toEqual(new Uint8Array(12))
   })
 
-  it('sets last_flag to 0x01 for final chunk', () => {
-    const baseNonce = new Uint8Array(7).fill(0xab)
-    const nonce = deriveChunkNonce(baseNonce, 5, true)
-
-    expect(nonce[7]).toBe(0)
-    expect(nonce[8]).toBe(0)
-    expect(nonce[9]).toBe(0)
-    expect(nonce[10]).toBe(5)
-    expect(nonce[11]).toBe(0x01)
+  it('encodes the chunk index in the final four nonce bytes', () => {
+    const nonce = deriveChunkNonce(0x01020304)
+    expect(nonce.slice(0, 8)).toEqual(new Uint8Array(8))
+    expect(nonce.slice(8)).toEqual(new Uint8Array([1, 2, 3, 4]))
   })
 
-  it('encodes chunk index as big-endian', () => {
-    const baseNonce = new Uint8Array(7).fill(0)
-    const nonce = deriveChunkNonce(baseNonce, 0x01020304, false)
-
-    expect(nonce[7]).toBe(0x01)
-    expect(nonce[8]).toBe(0x02)
-    expect(nonce[9]).toBe(0x03)
-    expect(nonce[10]).toBe(0x04)
+  it('rejects indexes outside an unsigned 32-bit integer', () => {
+    expect(() => deriveChunkNonce(-1)).toThrow('unsigned 32-bit')
+    expect(() => deriveChunkNonce(MAX_CHUNK_INDEX + 1)).toThrow('unsigned 32-bit')
   })
 })
 

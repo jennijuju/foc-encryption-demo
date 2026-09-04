@@ -28,9 +28,11 @@ describe('createHttpBlobFetcher', () => {
 
     expect(fetchFn).toHaveBeenNthCalledWith(1, 'https://example.test/blob', {
       headers: { Range: 'bytes=0-0' },
+      redirect: 'error',
     })
     expect(fetchFn).toHaveBeenNthCalledWith(2, 'https://example.test/blob', {
       headers: { Range: 'bytes=7-9' },
+      redirect: 'error',
     })
   })
 
@@ -47,6 +49,7 @@ describe('createHttpBlobFetcher', () => {
 
     expect(fetchFn).toHaveBeenNthCalledWith(2, 'https://example.test/blob', {
       headers: { Range: 'bytes=7-9' },
+      redirect: 'error',
     })
   })
 

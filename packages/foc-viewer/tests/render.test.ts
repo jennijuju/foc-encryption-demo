@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { detectContentType, renderContent, renderProgressiveMedia, supportsProgressiveMedia } from '../src/render.js'
+import { detectContentType, isBinaryPreviewType, renderContent } from '../src/render.js'
 
 function bytes(...values: number[]): Uint8Array {
   return new Uint8Array(values)
@@ -69,6 +69,18 @@ describe('detectContentType', () => {
   })
 })
 
+describe('isBinaryPreviewType', () => {
+  it('allows only browser-preview binary formats above the document cap', () => {
+    expect(isBinaryPreviewType('image/jpeg')).toBe(true)
+    expect(isBinaryPreviewType('audio/mpeg')).toBe(true)
+    expect(isBinaryPreviewType('video/mp4')).toBe(true)
+    expect(isBinaryPreviewType('application/pdf')).toBe(true)
+    expect(isBinaryPreviewType('text/html')).toBe(false)
+    expect(isBinaryPreviewType('text/plain')).toBe(false)
+    expect(isBinaryPreviewType('application/octet-stream')).toBe(false)
+  })
+})
+
 describe('renderContent', () => {
   it('renders buffered video with playback controls and a download link', () => {
     const createObjectURL = vi.fn(() => 'blob:video')
@@ -90,63 +102,3 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('progressive media', () => {
-  it('accepts only supported audio and video MIME types', () => {
-    vi.stubGlobal(
-      'MediaSource',
-      class {
-        static isTypeSupported(contentType: string): boolean {
-          return contentType === 'video/mp4'
-        }
-      }
-    )
-
-    expect(supportsProgressiveMedia('video/mp4')).toBe(true)
-    expect(supportsProgressiveMedia('video/quicktime')).toBe(false)
-    expect(supportsProgressiveMedia('application/pdf')).toBe(false)
-  })
-
-  it('returns the save fallback signal and revokes the URL when SourceBuffer rejects', async () => {
-    class RejectingMediaSource extends EventTarget {
-      static isTypeSupported(): boolean {
-        return true
-      }
-
-      readonly readyState = 'open'
-
-      addSourceBuffer(): SourceBuffer {
-        throw new Error('unsupported stream shape')
-      }
-
-      endOfStream(): void {}
-    }
-
-    vi.stubGlobal('MediaSource', RejectingMediaSource)
-    const revokeObjectURL = vi.fn()
-    vi.stubGlobal('URL', {
-      createObjectURL(source: EventTarget) {
-        queueMicrotask(() => source.dispatchEvent(new Event('sourceopen')))
-        return 'blob:media-source'
-      },
-      revokeObjectURL,
-    })
-    const media = {
-      controls: false,
-      src: '',
-      removeAttribute: vi.fn(),
-      load: vi.fn(),
-    }
-    const wrapper = { className: '', append: vi.fn() }
-    vi.stubGlobal('document', {
-      createElement(tagName: string) {
-        return tagName === 'div' ? wrapper : media
-      },
-    })
-    const container = { replaceChildren: vi.fn() } as unknown as HTMLElement
-    const open = vi.fn(async () => new ReadableStream<Uint8Array>())
-
-    await expect(renderProgressiveMedia(container, 'video/mp4', open)).resolves.toBe(false)
-    expect(open).not.toHaveBeenCalled()
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:media-source')
-  })
-})

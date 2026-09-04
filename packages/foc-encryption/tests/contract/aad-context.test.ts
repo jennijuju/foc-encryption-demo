@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseBlob } from '../../src/blob.js'
 import { CoseAlgorithm } from '../../src/cose/headers.js'
 import { buildEncStructure } from '../../src/cose/structures.js'
-import { aesGcmDecrypt, importAesGcmKey } from '../../src/crypto.js'
+import { aesGcmDecrypt, deriveAesGcmObjectKey } from '../../src/crypto.js'
 import { encrypt, parseEnvelope } from '../../src/envelope.js'
 import { deriveChunkNonce } from '../../src/schemes/chunked-aes-256-gcm.js'
 
@@ -11,9 +11,9 @@ import { deriveChunkNonce } from '../../src/schemes/chunked-aes-256-gcm.js'
 async function openChunk0(blob: Uint8Array, cek: Uint8Array, context: 'Encrypt' | 'Encrypt0') {
   const meta = parseEnvelope(blob)
   const { ciphertext } = parseBlob(blob)
-  const key = await importAesGcmKey(cek)
-  const nonce = deriveChunkNonce(meta.iv, 0, true) // single chunk => index 0, final
-  const aad = buildEncStructure(context, meta.protectedHeaders, new Uint8Array(0))
+  const key = await deriveAesGcmObjectKey(cek, meta.iv)
+  const nonce = deriveChunkNonce(0)
+  const aad = buildEncStructure(context, meta.protectedHeaders, new Uint8Array([1]))
   return aesGcmDecrypt(key, nonce, ciphertext, aad)
 }
 

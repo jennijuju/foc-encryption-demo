@@ -49,6 +49,24 @@ describe('seekable encryption', () => {
     expect(result).toEqual(plaintext.slice(offset, offset + length))
   })
 
+  it('rejects ranges that cross or start after plaintext EOF', async () => {
+    const cek = crypto.getRandomValues(new Uint8Array(32))
+    const plaintext = pattern(CHUNK_SIZE + 10)
+    const blob = await encrypt(plaintext, cek, {
+      algorithm: CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM,
+      chunkSize: CHUNK_SIZE,
+    })
+    const metadata = parseEnvelope(blob)
+    const fetcher = makeBlobFetcher(blob)
+
+    await expect(decryptRange(fetcher, metadata, cek, { offset: plaintext.length - 2, length: 3 })).rejects.toThrow(
+      /range/i
+    )
+    await expect(decryptRange(fetcher, metadata, cek, { offset: plaintext.length, length: 1 })).rejects.toThrow(
+      /range/i
+    )
+  })
+
   it('rejects range decryption for the non-seekable scheme', async () => {
     const cek = crypto.getRandomValues(new Uint8Array(32))
     const blob = await encrypt(new TextEncoder().encode('not seekable'), cek, {

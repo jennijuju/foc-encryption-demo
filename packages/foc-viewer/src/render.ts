@@ -27,6 +27,15 @@ export async function detectContentType(data: Uint8Array): Promise<string> {
   }
 }
 
+export function isBinaryPreviewType(contentType: string): boolean {
+  return (
+    contentType.startsWith('image/') ||
+    contentType.startsWith('audio/') ||
+    contentType.startsWith('video/') ||
+    contentType === 'application/pdf'
+  )
+}
+
 export function renderContent(container: HTMLElement, data: Uint8Array, contentType: string): void {
   revokeRenderedObjectUrls(container)
   if (contentType === 'text/html') {
@@ -91,86 +100,3 @@ export function renderContent(container: HTMLElement, data: Uint8Array, contentT
   `
 }
 
-export function supportsProgressiveMedia(contentType: string): boolean {
-  if (!contentType.startsWith('audio/') && !contentType.startsWith('video/')) return false
-  if (typeof MediaSource === 'undefined') return false
-  try {
-    return MediaSource.isTypeSupported(contentType)
-  } catch {
-    return false
-  }
-}
-
-function appendMediaChunk(sourceBuffer: SourceBuffer, chunk: Uint8Array): Promise<void> {
-  const { promise, resolve, reject } = Promise.withResolvers<void>()
-  const cleanup = () => {
-    sourceBuffer.removeEventListener('updateend', handleUpdate)
-    sourceBuffer.removeEventListener('error', handleError)
-  }
-  const handleUpdate = () => {
-    cleanup()
-    resolve()
-  }
-  const handleError = () => {
-    cleanup()
-    reject(new Error('Media buffer rejected decrypted data'))
-  }
-
-  sourceBuffer.addEventListener('updateend', handleUpdate, { once: true })
-  sourceBuffer.addEventListener('error', handleError, { once: true })
-  try {
-    sourceBuffer.appendBuffer(Uint8Array.from(chunk).buffer)
-  } catch (error) {
-    cleanup()
-    reject(error)
-  }
-  return promise
-}
-
-export async function renderProgressiveMedia(
-  container: HTMLElement,
-  contentType: string,
-  open: () => Promise<ReadableStream<Uint8Array>>
-): Promise<boolean> {
-  if (!supportsProgressiveMedia(contentType)) return false
-
-  revokeRenderedObjectUrls(container)
-  const mediaSource = new MediaSource()
-  const objectUrl = URL.createObjectURL(mediaSource)
-  const media = document.createElement(contentType.startsWith('audio/') ? 'audio' : 'video')
-  media.controls = true
-  media.src = objectUrl
-  const wrapper = document.createElement('div')
-  wrapper.className = 'content-wrapper'
-  wrapper.append(media)
-  container.replaceChildren(wrapper)
-
-  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
-  let retainObjectUrl = false
-  try {
-    const { promise, resolve, reject } = Promise.withResolvers<void>()
-    mediaSource.addEventListener('sourceopen', () => resolve(), { once: true })
-    mediaSource.addEventListener('sourceclose', () => reject(new Error('Media source closed')), { once: true })
-    await promise
-
-    const sourceBuffer = mediaSource.addSourceBuffer(contentType)
-    reader = (await open()).getReader()
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (value.length) await appendMediaChunk(sourceBuffer, value)
-    }
-    if (mediaSource.readyState === 'open') mediaSource.endOfStream()
-    activeObjectUrls.set(container, [objectUrl])
-    retainObjectUrl = true
-    return true
-  } catch {
-    await reader?.cancel().catch(() => undefined)
-    media.removeAttribute('src')
-    media.load()
-    container.replaceChildren()
-    return false
-  } finally {
-    if (!retainObjectUrl) URL.revokeObjectURL(objectUrl)
-  }
-}

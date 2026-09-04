@@ -29,7 +29,7 @@ Every value in this map is included in the AES-GCM AAD through the RFC 9052 `Enc
 
 ```text
 UnprotectedHeaders
-└── 5: nonce or base nonce
+└── 5: nonce or object nonce, 12 bytes
 ```
 
 No other unprotected parameter is accepted. Changing the nonce causes authentication failure.
@@ -51,7 +51,7 @@ SimpleBody
 ```text
 ChunkedBody
 ├── algorithm: -65793
-├── base nonce: 7 bytes
+├── object nonce: 12 random bytes; HKDF-SHA-256 salt for an object-specific AES key
 ├── chunk size: 4 KiB through 16 MiB; default 256 KiB
 └── encrypted chunks: each plaintext chunk + 16-byte tag
 ```
@@ -59,7 +59,8 @@ ChunkedBody
 Chunk count is derived from total ciphertext length. It is not stored in the envelope.
 
 ```text
-chunk nonce = base_nonce[7] || chunk_index_u32_be[4] || final_flag[1]
+chunk nonce = zero[8] || chunk_index_u32_be[4]
+chunk external AAD = final ? 0x01 : 0x00
 ```
 
 ## Public TypeScript values
@@ -74,6 +75,7 @@ interface EnvelopeMetadata {
   protectedHeaders: Uint8Array
   chunkSize?: number
   chunkCount?: number
+  plaintextSize: number
   appMetadata?: AppMetadata
   envelopeSize: number
 }

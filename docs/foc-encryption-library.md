@@ -39,7 +39,7 @@ The protected header map is authenticated as AES-GCM additional authenticated da
 | `-1` | Chunk size | Required only for chunked encryption; 4 KiB through 16 MiB; default 256 KiB |
 | `-65792` | Application metadata | Optional string-keyed map with bounded scalar or byte-string values |
 
-The unprotected header map contains only label `5`, the nonce. AES-256-GCM uses a 12-byte nonce. The chunked scheme uses a 7-byte base nonce. Changing the nonce causes authentication failure.
+The unprotected header map contains only label `5`, a fresh 12-byte random nonce. Changing the nonce causes authentication failure.
 
 The envelope is limited to 1 MiB. Application metadata is limited to 32 entries, 128 characters per key, and 64 KiB per string or byte-string value. Unknown protected or unprotected parameters, wrong types, unsupported versions, wrong media types, non-nil embedded payloads, invalid array lengths, and invalid chunk geometry are rejected.
 
@@ -47,15 +47,11 @@ Chunk count is not stored. Consumers derive it from the authenticated chunk size
 
 ## Chunked encryption
 
-The chunked scheme uses algorithm `-65793`. Each plaintext chunk is sealed independently with AES-256-GCM. Its nonce is:
+The chunked scheme uses algorithm `-65793`. Each object carries a fresh random 96-bit object nonce. HKDF-SHA-256 derives an object-specific AES-256-GCM key from the caller’s CEK, that nonce as salt, and the fixed info string `FEE v1 chunked AES-256-GCM object key`.
 
-```text
-7-byte base nonce || 4-byte big-endian chunk index || 1-byte final flag
-```
+Each plaintext chunk is sealed independently under that object key. Its 96-bit AES-GCM nonce is eight zero bytes followed by the unsigned 32-bit big-endian chunk index. The one-byte external AAD is `0x01` for the final chunk and `0x00` otherwise. This authenticated final marker detects truncation. Reusing a caller CEK across objects remains safe while the 96-bit object nonce stays unique; reordering, insertion, deletion, wrong keys, changed protected metadata, or changed ciphertext causes authentication failure.
 
-The final flag detects truncation. Reordering, insertion, deletion, wrong keys, changed protected metadata, or changed ciphertext causes authentication failure.
-
-`decryptRange` accepts plaintext coordinates. It fetches only the encrypted chunks needed for that range and caps one requested plaintext range at 16 MiB. Callers must not render or save partial plaintext after an authentication failure.
+`decryptRange` accepts plaintext coordinates. It rejects ranges beyond authenticated plaintext EOF, fetches only the encrypted chunks needed for an accepted range, and caps one requested plaintext range at 16 MiB. Callers must not render or save partial plaintext after an authentication failure.
 
 ## Remote object interface
 
@@ -120,7 +116,9 @@ node foc-protect.mjs \
   --access-key-output-fd 3
 ```
 
-The process writes exactly one non-secret JSON result to stdout, diagnostics to stderr, and the generated access key only to descriptor 3. It accepts no password or key in command arguments. Final output is written to a mode-0600 temporary sibling, synchronized, and linked into place without overwriting an existing destination.
+The process writes exactly one non-secret JSON result to stdout, diagnostics to stderr, and the generated access key only to descriptor 3. It accepts no password or key in command arguments. It rejects hard-linked sources, reads each validated source file to its exact snapshotted length, rechecks file identity and timestamps, rescans the selected tree, then writes final output through a mode-0600 temporary sibling synchronized and linked into place without overwriting an existing destination.
+
+The source-byte preflight is not the final object limit. The generated ZIP, including its headers and directory, must also remain below 1000 MiB; a source close to the ceiling can be rejected after bounded local archive construction.
 
 ## Browser contract
 
@@ -128,12 +126,12 @@ The viewer accepts only `#cid=<encrypted-root-cid>`. It never accepts an access 
 
 - Sanitized HTML and text render through 8 MiB.
 - Images, PDFs, audio, and video preview through 64 MiB.
-- Larger media may preview only when capability detection and authenticated streaming succeed.
-- Failed or unsupported preview shows an explicit **Download instead** action. It never downloads automatically and never reuses a partially consumed stream.
+- Larger entries use an explicit download action; they are never accumulated in a `MediaSource` preview buffer.
+- Unsupported download sinks show an explicit failure. The viewer never downloads automatically and never buffers the complete large object.
 - The complete protected file or folder must remain below 1000 MiB.
 - Large downloads stream decrypted bytes to a supported disk sink. They never fall back to buffering the complete object.
 
-Decrypted HTML is static. Scripts, event handlers, forms, frames, refresh, anchors, active SVG, resource/navigation URLs, parent access, and top navigation are removed. The archive exposes `close()`, closes its ZIP reader, and best-effort wipes the mutable content-encryption key on disposal.
+Decrypted HTML is static. Scripts, event handlers, forms, frames, refresh, anchors, active SVG, resource/navigation URLs, parent access, and top navigation are removed. The access-key field accepts only the exact 50-character generated format. The archive exposes `close()`, closes its ZIP reader, and best-effort wipes the mutable content-encryption key after one-shot render, successful one-shot download, or page disposal; folder archives remain open only while browsing.
 
 ## Review requirements
 

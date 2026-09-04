@@ -38,6 +38,7 @@ export interface EnvelopeMetadata {
   protectedHeaders: Uint8Array
   chunkSize?: number
   chunkCount?: number
+  plaintextSize: number
   appMetadata?: AppMetadata
   envelopeSize: number
 }

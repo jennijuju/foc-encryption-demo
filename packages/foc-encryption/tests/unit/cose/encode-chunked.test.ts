@@ -19,8 +19,8 @@ describe('encodeCoseEncrypt0 with chunked scheme', () => {
     expect(arr[1].has(-65791)).toBe(false)
   })
 
-  it('uses 7-byte IV for chunked scheme', () => {
-    const iv = new Uint8Array(7).fill(0xab)
+  it('uses a 12-byte IV for the chunked scheme', () => {
+    const iv = new Uint8Array(12).fill(0xab)
     const encoded = encodeCoseEncrypt0(CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM, iv, {
       chunkSize: 4096,
     })
@@ -29,6 +29,6 @@ describe('encodeCoseEncrypt0 with chunked scheme', () => {
 
     const unprotectedMap = arr[1] as Map<number, unknown>
     const decodedIv = unprotectedMap.get(5) as Uint8Array
-    expect(decodedIv.length).toBe(7)
+    expect(decodedIv.length).toBe(12)
   })
 })

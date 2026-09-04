@@ -1,9 +1,9 @@
 /**
- * foc-encryption — COSE-based encryption envelopes for content-addressed data.
+ * foc-encryption implements the versioned COSE_Encrypt0 FEE profile.
  *
- * Provides AES-256-GCM encryption with COSE_Encrypt0/COSE_Encrypt envelopes,
- * optional chunked STREAM construction for seekable decryption, multi-recipient
- * key management descriptors, and keyless envelope inspection.
+ * Provides complete and streaming AES-256-GCM encryption, chunked STREAM
+ * construction for authenticated range decryption, strict envelope inspection,
+ * and an HTTP Range adapter for Node and modern browsers.
  *
  * @packageDocumentation
  */

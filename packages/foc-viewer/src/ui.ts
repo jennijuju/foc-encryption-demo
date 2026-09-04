@@ -5,6 +5,7 @@ const WASH_URL = new URL('../assets/engram-wash.png', import.meta.url).href
 
 const ACCESS_KEY_ERROR = 'That access key could not decrypt this share. Check it and try again.'
 const LOAD_ERROR = 'This share could not be loaded yet. It may still be propagating; try again shortly.'
+const ACCESS_KEY_PATTERN = /^engram_[A-Za-z0-9_-]{43}$/
 
 export function unlockErrorMessage(cause: unknown): string {
   if (
@@ -16,6 +17,10 @@ export function unlockErrorMessage(cause: unknown): string {
     return ACCESS_KEY_ERROR
   }
   return LOAD_ERROR
+}
+
+export function isValidAccessKey(value: string): boolean {
+  return ACCESS_KEY_PATTERN.test(value)
 }
 
 export function showAccessKeyPrompt(container: HTMLElement, onSubmit: (accessKey: string) => Promise<void>): void {
@@ -40,7 +45,7 @@ export function showAccessKeyPrompt(container: HTMLElement, onSubmit: (accessKey
         </div>
         <label for="pw-input">Access key</label>
         <div class="password-input">
-          <input type="password" id="pw-input" autocomplete="off" placeholder="Paste access key" />
+          <input type="password" id="pw-input" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="50" placeholder="Paste access key" />
           <button class="password-toggle" id="password-toggle" type="button" aria-label="Show access key" aria-pressed="false">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
               <path d="M2.7 12s3.4-5.2 9.3-5.2S21.3 12 21.3 12s-3.4 5.2-9.3 5.2S2.7 12 2.7 12Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
@@ -81,6 +86,12 @@ export function showAccessKeyPrompt(container: HTMLElement, onSubmit: (accessKey
     if (!passwordInput.value) {
       error.textContent = 'Paste the access key you received from the sender.'
       error.hidden = false
+      return
+    }
+    if (!isValidAccessKey(passwordInput.value)) {
+      error.textContent = 'Paste a valid 50-character Engram access key.'
+      error.hidden = false
+      passwordInput.select()
       return
     }
 

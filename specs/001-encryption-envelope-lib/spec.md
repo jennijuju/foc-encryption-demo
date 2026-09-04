@@ -48,7 +48,7 @@ The unprotected map contains exactly one value:
 
 | Label | Name | Type | Rule |
 |---:|---|---|---|
-| `5` | `iv` | byte string | REQUIRED; 12 bytes for algorithm `3`, 7 bytes for algorithm `-65793` |
+| `5` | `iv` | byte string | REQUIRED; 12 bytes for algorithms `3` and `-65793` |
 
 The nonce is unprotected because the decryptor needs it before AEAD verification. Changing it causes authentication failure. Every other unprotected parameter is rejected.
 
@@ -79,25 +79,21 @@ Original filenames, folder paths, user identifiers, and private metadata MUST re
 ## Algorithm -65793: chunked AES-256-GCM-STREAM
 
 - CEK: exactly 32 bytes and not all zero.
-- Base nonce: 7 fresh random bytes.
+- Object nonce: 12 fresh random bytes.
 - Chunk size: 256 KiB by default; accepted range 4 KiB through 16 MiB.
 - Authentication tag: 16 bytes per chunk.
 - At least one chunk is emitted, including for empty plaintext.
 - Chunk count is derived from total ciphertext length and authenticated chunk size. It is not stored.
 
-Each chunk nonce is:
+HKDF-SHA-256 derives an object-specific AES-256-GCM key from the 32-byte caller CEK, the object nonce as salt, and the exact UTF-8 info string `FEE v1 chunked AES-256-GCM object key`.
 
-```text
-base_nonce[7] || chunk_index_u32_be[4] || final_flag[1]
-```
-
-`final_flag` is `0x01` only for the final chunk and `0x00` otherwise. This binds order and detects removed final chunks. The maximum index is `2^32 - 1`.
+For chunk index `i`, the 12-byte AES-GCM nonce is eight zero bytes followed by `i` encoded as unsigned 32-bit big-endian. The maximum index is `2^32 - 1`. The `Enc_structure` external AAD is the single byte `0x01` for the final chunk and `0x00` for every other chunk. This authenticates the final marker and detects truncation. Object-key separation retains 96 bits of cross-object nonce uniqueness even when a caller reuses its CEK.
 
 The final encrypted chunk MUST contain at least its 16-byte tag and no more than `chunk_size + 16` bytes. Geometry that leaves a shorter tag, an extra partial structure, or a plaintext size inconsistent with authenticated metadata is rejected before plaintext is trusted.
 
 ## Range decryption
 
-Ranges use plaintext coordinates `[offset, offset + length)`. Offsets and lengths MUST be non-negative safe integers. One call is limited to 16 MiB of plaintext.
+Ranges use plaintext coordinates `[offset, offset + length)`. Offsets and lengths MUST be non-negative safe integers, and the end MUST NOT exceed the plaintext size derived from authenticated envelope geometry. One call is limited to 16 MiB of plaintext.
 
 The decryptor derives the first and last chunk, fetches only the affected encrypted chunks, authenticates each independently, concatenates the resulting plaintext, and returns exactly the requested bytes. A failure in any affected chunk invalidates the entire requested result. Partial plaintext MUST NOT be rendered or saved.
 
@@ -112,7 +108,7 @@ interface BlobFetcher {
 }
 ```
 
-Envelope parsing starts with 4 KiB and doubles the probe only when needed, up to 1 MiB. An HTTP adapter MUST require status 206, exact safe-integer `Content-Range` start/end/total values, stable total size, and a body whose length exactly matches the response range. Shortened, oversized, inconsistent, ignored, malformed, and unsafe ranges are rejected.
+Envelope parsing starts with 4 KiB and doubles the probe only when needed, up to 1 MiB. In-memory parsing also slices a bounded prefix before CBOR decoding. Duplicate CBOR map keys are rejected. An HTTP adapter MUST reject redirects and require status 206, exact safe-integer `Content-Range` start/end/total values, stable total size, and a body whose length exactly matches the response range. Shortened, oversized, inconsistent, ignored, malformed, and unsafe ranges are rejected.
 
 ## Generated access-key profile
 
@@ -130,7 +126,7 @@ PBKDF2-HMAC-SHA-256 with 600,000 iterations, a fresh 16-byte salt, and 32-byte o
 
 - Wrong CEK, changed protected metadata, changed nonce, changed ciphertext, reordered chunks, inserted chunks, or removed chunks MUST fail authentication.
 - Malformed structure, unsupported profile, unsupported algorithm, invalid metadata, invalid geometry, oversized values, and hostile range responses MUST fail with bounded work and typed errors.
-- Final encrypted output MUST be transactional and no-overwrite. A failed operation MUST NOT leave a partial final object.
+- Final encrypted output MUST be transactional and no-overwrite. Source hard links and source changes during protection MUST be rejected. A failed or interrupted product operation MUST terminate its child and remove its private temporary directory, plaintext ZIP, and partial final object.
 - JavaScript implementations MAY wipe mutable internal byte arrays on completion, but MUST NOT claim guaranteed erasure of strings, `CryptoKey` objects, browser caches, OS swap, or recipient-retained plaintext.
 
 ## Review gate

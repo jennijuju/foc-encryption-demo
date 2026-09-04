@@ -15,6 +15,7 @@ const MAX_APP_METADATA_ENTRIES = 32
 const MAX_APP_METADATA_KEY_LENGTH = 128
 const MAX_APP_METADATA_VALUE_LENGTH = 64 * 1024
 const MAX_PROTECTED_HEADERS_LENGTH = 1024 * 1024
+const MAX_ENVELOPE_SIZE = 1024 * 1024
 
 interface EncodeOptions {
   appMetadata?: AppMetadata
@@ -28,7 +29,11 @@ function buildUnprotectedMap(iv: Uint8Array): Map<number, unknown> {
 export function encodeCoseEncrypt0(algorithmId: number, iv: Uint8Array, options?: EncodeOptions): Uint8Array {
   const protectedBytes = getProtectedHeaderBytes(algorithmId, options)
   const unprotectedMap = buildUnprotectedMap(iv)
-  return encode(new Tagged(COSE_TAG_ENCRYPT0, [protectedBytes, unprotectedMap, null]))
+  const envelope = encode(new Tagged(COSE_TAG_ENCRYPT0, [protectedBytes, unprotectedMap, null]))
+  if (envelope.length > MAX_ENVELOPE_SIZE) {
+    throw new FocEncryptionError('FEE envelope is too large')
+  }
+  return envelope
 }
 
 export function getProtectedHeaderBytes(algorithmId: number, options?: EncodeOptions): Uint8Array {

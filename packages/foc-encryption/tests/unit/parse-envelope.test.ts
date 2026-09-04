@@ -33,7 +33,7 @@ describe('parseEnvelope', () => {
 
     expect(metadata.algorithm).toBe(-65793)
     expect(metadata.seekable).toBe(true)
-    expect(metadata.iv.length).toBe(7)
+    expect(metadata.iv.length).toBe(12)
     expect(metadata.chunkSize).toBe(4096)
     expect(metadata.chunkCount).toBe(3)
   })
