@@ -1,5 +1,7 @@
 # Research: Encryption Envelope Library
 
+> Historical prototype research. Its rejected/selected alternatives remain useful context, but the active v1 wire and product decisions are in `spec.md` and `data-model.md`.
+
 **Feature**: 001-encryption-envelope-lib
 **Date**: 2026-03-26
 

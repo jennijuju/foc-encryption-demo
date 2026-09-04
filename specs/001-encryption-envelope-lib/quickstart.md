@@ -1,133 +1,85 @@
-# Quickstart: foc-encryption
+# FEE TypeScript quickstart
 
-## Install
+This quickstart uses only local non-secret key material. The repository is a local review candidate and is not published or production-ready.
+
+## Install and build
 
 ```bash
-pnpm add foc-encryption
+pnpm install
+pnpm --filter foc-encryption build
 ```
 
-## Basic Encryption & Decryption (AES-256-GCM)
-
-```typescript
-import { encrypt, decrypt, CoseAlgorithm } from 'foc-encryption'
-
-// Generate a 256-bit content encryption key
-const cek = crypto.getRandomValues(new Uint8Array(32))
-
-// Encrypt
-const plaintext = new TextEncoder().encode('Hello, Filecoin!')
-const blob = await encrypt(plaintext, cek, {
-  algorithm: CoseAlgorithm.AES_256_GCM,
-})
-
-// Decrypt
-const decrypted = await decrypt(blob, cek)
-console.log(new TextDecoder().decode(decrypted))
-// → "Hello, Filecoin!"
-```
-
-## Seekable Encryption (Large Files)
-
-```typescript
-import { encrypt, decryptRange, CoseAlgorithm } from 'foc-encryption'
-
-const largeFile = new Uint8Array(10 * 1024 * 1024) // 10 MB
-const cek = crypto.getRandomValues(new Uint8Array(32))
-
-// Encrypt with chunked scheme (256 KiB chunks by default)
-const blob = await encrypt(largeFile, cek, {
-  algorithm: CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM,
-})
-
-// Decrypt only bytes 1000–1999 (reads only the affected chunks)
-const range = await decryptRange(blob, cek, { offset: 1000, length: 1000 })
-```
-
-## Inspect Envelope Without a Key
-
-```typescript
-import { parseEnvelope, CoseAlgorithm } from 'foc-encryption'
-
-const metadata = parseEnvelope(blob)
-console.log(metadata.algorithm)    // 3 or -65793
-console.log(metadata.seekable)    // true/false
-console.log(metadata.recipients)  // key management descriptors
-console.log(metadata.appMetadata) // { cid: Uint8Array, ... } or undefined
-```
-
-## Multi-Recipient Encryption
-
-```typescript
-import { encrypt, CoseAlgorithm } from 'foc-encryption'
-
-const cek = crypto.getRandomValues(new Uint8Array(32))
-const plaintext = new TextEncoder().encode('Shared secret')
-
-// Wrap the CEK for each recipient (using your key management layer)
-const recipients = [
-  {
-    algorithm: -3, // A256KW
-    keyId: new TextEncoder().encode('alice'),
-    wrappedKey: wrapKeyForAlice(cek),
-  },
-  {
-    algorithm: -3,
-    keyId: new TextEncoder().encode('bob'),
-    wrappedKey: wrapKeyForBob(cek),
-  },
-]
-
-const blob = await encrypt(plaintext, cek, {
-  algorithm: CoseAlgorithm.AES_256_GCM,
-}, recipients)
-```
-
-## Range Decryption with HTTP Fetcher
-
-```typescript
-import { decryptRange, CoseAlgorithm } from 'foc-encryption'
-
-// Implement BlobFetcher for HTTP Range requests
-const fetcher = {
-  async fetchEnvelope() {
-    // Fetch first ~1KB to get the envelope
-    const res = await fetch(url, { headers: { Range: 'bytes=0-1023' } })
-    return new Uint8Array(await res.arrayBuffer())
-  },
-  async fetchRange(offset: number, length: number) {
-    const res = await fetch(url, {
-      headers: { Range: `bytes=${offset}-${offset + length - 1}` },
-    })
-    return new Uint8Array(await res.arrayBuffer())
-  },
-}
-
-const cek = /* obtain key from your KMS */
-const partial = await decryptRange(fetcher, cek, { offset: 0, length: 4096 })
-```
-
-## Error Handling
+## Encrypt and decrypt in memory
 
 ```typescript
 import {
+  CoseAlgorithm,
   decrypt,
-  InvalidKeyError,
-  AuthenticationError,
-  UnsupportedSchemeError,
-  MalformedEnvelopeError,
+  encrypt,
+  parseEnvelope,
 } from 'foc-encryption'
 
-try {
-  const plaintext = await decrypt(blob, cek)
-} catch (err) {
-  if (err instanceof InvalidKeyError) {
-    console.error('Key is wrong size or invalid')
-  } else if (err instanceof AuthenticationError) {
-    console.error('Data has been tampered with, or wrong key')
-  } else if (err instanceof UnsupportedSchemeError) {
-    console.error(`Unknown algorithm: ${err.algorithmId}`)
-  } else if (err instanceof MalformedEnvelopeError) {
-    console.error('Blob does not contain a valid COSE envelope')
-  }
-}
+const plaintext = new TextEncoder().encode('hello, filecoin')
+const cek = crypto.getRandomValues(new Uint8Array(32))
+
+const encrypted = await encrypt(plaintext, cek, {
+  algorithm: CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM,
+  chunkSize: 4096,
+  appMetadata: { content_type: 'text/plain' },
+})
+
+const metadata = parseEnvelope(encrypted)
+const restored = await decrypt(encrypted, cek)
 ```
+
+The parsed `chunkCount` is derived from total ciphertext length. It is not stored in the envelope.
+
+## Decrypt a remote range
+
+```typescript
+import {
+  createHttpBlobFetcher,
+  decryptRange,
+  parseEnvelope,
+} from 'foc-encryption'
+
+const fetcher = createHttpBlobFetcher('https://example.invalid/encrypted-object')
+const metadata = await parseEnvelope(fetcher)
+const bytes = await decryptRange(fetcher, metadata, cek, {
+  offset: 4096,
+  length: 1024,
+})
+```
+
+The server must implement exact HTTP byte ranges. The adapter rejects ignored, shortened, oversized, inconsistent, or malformed responses.
+
+## Build the agent protector
+
+```bash
+pnpm --filter foc-demo build:protect
+```
+
+The standalone agent artifact is `packages/foc-demo/dist/foc-protect.mjs`. It generates the access key and writes it only to a dedicated inherited descriptor:
+
+```text
+node packages/foc-demo/dist/foc-protect.mjs \
+  --input <file-or-directory> \
+  --output <new-neutral.fee> \
+  --access-key-output-fd 3
+```
+
+Do not substitute a command-line access-key flag. The generated key must never enter shell history, process arguments, ordinary output, logs, or URLs.
+
+## Viewer link
+
+The viewer accepts only the encrypted Root CID:
+
+```text
+https://<viewer-origin>/#cid=<encrypted-root-cid>
+```
+
+The recipient pastes the separately delivered access key. The link and access key are both required. Anyone who receives both can view and forward both.
+
+## Unsupported in v1
+
+Multi-recipient envelopes, X25519, KMS, user-selected passphrases, password-bearing URLs, and live Filecoin automated tests are outside the v1 profile.

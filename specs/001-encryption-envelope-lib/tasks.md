@@ -1,5 +1,7 @@
 # Tasks: Encryption Envelope Library
 
+> Historical implementation ledger for the prototype. Completed recipient, header-label, and chunk-count items below do not describe the v1 production profile. Use `spec.md` and current tests for active requirements.
+
 **Input**: Design documents from `/specs/001-encryption-envelope-lib/`
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/public-api.ts
 
