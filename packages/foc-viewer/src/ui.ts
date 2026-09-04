@@ -1,5 +1,8 @@
 import type { ProtectedEntry } from './protected-archive.js'
 
+const MARK_URL = new URL('../assets/engram-mark.png', import.meta.url).href
+const WASH_URL = new URL('../assets/engram-wash.png', import.meta.url).href
+
 const PASSWORD_ERROR = 'That password could not decrypt this share. Check it and try again.'
 const LOAD_ERROR = 'This share could not be loaded yet. It may still be propagating; try again shortly.'
 
@@ -19,39 +22,34 @@ export function showPasswordPrompt(container: HTMLElement, onSubmit: (password: 
   container.innerHTML = `
     <div class="evidence-gate">
       <section class="evidence">
-        <div class="engram-brand">
-          <svg viewBox="20 10 460 180" aria-hidden="true">
-            <defs>
-              <linearGradient id="engram-mark" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stop-color="#7185F5" />
-                <stop offset=".55" stop-color="#A9B1F4" />
-                <stop offset="1" stop-color="#D7D9F6" />
-              </linearGradient>
-            </defs>
-            <path d="M444,88 C374,26 280,40 185,120 C150,150 92,168 66,140 C40,112 66,70 110,80 C142,88 162,102 185,120 C240,170 330,174 410,158" fill="none" stroke="currentColor" stroke-width="14" stroke-linecap="round" />
-            <circle cx="410" cy="158" r="16" fill="url(#engram-mark)" />
-          </svg>
-          <span>engram</span>
-        </div>
         <p class="eyebrow">Password-protected share</p>
-        <h1>Protected without an account.</h1>
-        <p>This page fetches public ciphertext and decrypts it only after you enter the password.</p>
+        <h1>Share only what you choose.</h1>
+        <p>This content stays encrypted while it is stored and shared. Enter the password to open it here.</p>
         <ul>
-          <li>Viewer code is fixed by its CID</li>
-          <li>Password stays in this browser tab</li>
-          <li>Content cannot make network requests</li>
+          <li>Decryption happens in your browser</li>
+          <li>This page cannot change behind the link</li>
         </ul>
       </section>
       <form class="password-form">
+        <img class="engram-corner-wash" src="${WASH_URL}" alt="" />
+        <img class="engram-corner-mark" src="${MARK_URL}" alt="" />
+        <div class="form-heading">
+          <p class="form-kicker">Open protected content</p>
+          <h2>Unlock this share</h2>
+          <p>Use the password the sender gave you separately.</p>
+        </div>
         <label for="pw-input">Password</label>
         <div class="password-input">
-          <input type="password" id="pw-input" autocomplete="off" placeholder="Six words" />
+          <input type="password" id="pw-input" autocomplete="off" placeholder="Enter password" />
           <button class="password-toggle" id="password-toggle" type="button" aria-label="Show password" aria-pressed="false">
-            <span aria-hidden="true">👁</span>
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
+              <path d="M2.7 12s3.4-5.2 9.3-5.2S21.3 12 21.3 12s-3.4 5.2-9.3 5.2S2.7 12 2.7 12Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
+              <circle cx="12" cy="12" r="2.6" stroke="currentColor" stroke-width="1.7" />
+            </svg>
           </button>
         </div>
         <button class="btn-primary" id="view-btn" type="submit">Unlock</button>
-        <p class="hint">The password is never added to this address.</p>
+        <p class="hint">Only someone with the password can unlock this share.</p>
         <p class="error" id="error" role="alert" hidden></p>
       </form>
     </div>
