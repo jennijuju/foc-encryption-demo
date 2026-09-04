@@ -16,6 +16,10 @@ export interface ChunkedEncryptOptions {
   appMetadata?: AppMetadata
 }
 
+export interface StreamEncryptOptions extends ChunkedEncryptOptions {
+  plaintextLength: number
+}
+
 export type EncryptOptions = SimpleEncryptOptions | ChunkedEncryptOptions
 
 export interface AppMetadata {

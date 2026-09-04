@@ -9,10 +9,13 @@
  */
 
 /** Encrypt plaintext into a COSE envelope + ciphertext blob. */
-export { decrypt, decryptRange, encrypt, parseEnvelope } from './envelope.js'
+export { decrypt, decryptRange, encrypt, encryptStream, parseEnvelope } from './envelope.js'
+/** HTTP Range adapter for remote encrypted blobs. */
+export { createHttpBlobFetcher } from './http-fetcher.js'
 
 /** COSE algorithm identifiers and header parameter labels. */
 export { CoseAlgorithm, CoseHeaderParam } from './cose/headers.js'
+export { MAX_CHUNK_SIZE } from './schemes/chunked-aes-256-gcm.js'
 
 export type {
   /** Application-level metadata stored in the COSE envelope. */
@@ -39,6 +42,8 @@ export type {
   RecipientInfo,
   /** Options for simple (non-seekable) encryption. */
   SimpleEncryptOptions,
+  /** Options for bounded-memory chunked encryption from a byte stream. */
+  StreamEncryptOptions,
 } from './types.js'
 
 /** Derive a content encryption key from a password or raw hex material. */

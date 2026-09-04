@@ -1,8 +1,9 @@
+import type { PieceCID } from '@filoz/synapse-sdk'
 import { writeFile } from 'node:fs/promises'
-import { decryptRange, parseEnvelope } from 'foc-encryption'
+import { createHttpBlobFetcher, decryptRange, parseEnvelope } from 'foc-encryption'
 import { deriveKey, parseKeySource } from '../key.js'
 import { parseLocator } from '../locator.js'
-import { createBlobFetcher, createSynapseClient } from '../synapse.js'
+import { createSynapseClient } from '../synapse.js'
 import { formatSize } from '../util.js'
 
 export interface RangeFlags {
@@ -28,10 +29,12 @@ export async function rangeDecrypt(flags: RangeFlags): Promise<void> {
     }
     const synapse = createSynapseClient({ privateKey })
     const ctx = await synapse.storage.createContext()
-    url = ctx.getPieceUrl(locator.pieceCid as any)
+    // The SDK brands the PieceCID string; this preserves the existing locator contract.
+    const pieceCid = locator.pieceCid as unknown as PieceCID
+    url = ctx.getPieceUrl(pieceCid)
   }
 
-  const fetcher = createBlobFetcher(url)
+  const fetcher = createHttpBlobFetcher(url)
   const metadata = await parseEnvelope(fetcher)
 
   if (!metadata.seekable) {

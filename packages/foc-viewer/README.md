@@ -1,66 +1,52 @@
 # foc-viewer
 
-A single-file SPA for viewing encrypted content produced by `foc-encryption`. Build output is a single self-contained `dist/index.html` with all JavaScript inlined — no server required, open it directly in a browser or host it statically.
+A single-file browser viewer for password-encrypted content produced by `foc-encryption`. The build output is one self-contained `dist/index.html`.
 
 ## Usage
 
-### Auto-decrypt via shared link
+Open the viewer with one encrypted Root CID:
 
-Navigate to the viewer with a URL fragment containing both `url` and `pw`:
-
-```
-https://example.com/viewer/#url=<blob-url>&pw=<password>
+```text
+https://<viewer-cid>.ipfs.inbrowser.link/#cid=<encrypted-root-cid>
 ```
 
-The page fetches the encrypted blob, derives the decryption key via PBKDF2, decrypts, and renders content automatically.
+The viewer validates the CID-shaped value, derives `https://<encrypted-root-cid>.ipfs.dweb.link/`, and shows a password prompt. It never accepts a password or arbitrary retrieval URL in the fragment. The entered password stays in the current page and is not written to history or browser storage.
 
-### Password prompt
+Opening the viewer without a valid `#cid=` fragment shows an incomplete-link message.
 
-Navigate with only `url` in the fragment — a password prompt is shown:
+## Content rendering
 
-```
-https://example.com/viewer/#url=<blob-url>
-```
+The viewer opens a STORE-method ZIP carried inside a seekable FEE envelope. Original filenames appear only after the password authenticates the encrypted central directory.
 
-### Manual entry
+| Entry | Rendering |
+|---|---|
+| Self-contained HTML up to 16 MiB | Static markup in an opaque-origin iframe; scripts, handlers, refresh, forms, embedded contexts, anchors, SVG animation, and navigation/resource URLs are removed |
+| Image, PDF, or text up to 16 MiB | Inline browser rendering |
+| Supported audio/video above 16 MiB | Best-effort MediaSource stream; rejected containers fall back to Save |
+| Any large entry | Progressive Chromium save through the File System Access API; other browsers show the compatibility message |
 
-Open the viewer with no fragment. Fill in the blob URL and password, then click **View Content** to decrypt or **Copy Link** to copy a shareable URL to the clipboard.
-
-## Supported content types
-
-Detected from magic bytes and rendered inline where possible:
-
-| Type | Rendering |
-|------|-----------|
-| HTML | Replaces page DOM |
-| Images (PNG, JPEG, GIF, WebP) | Centered `<img>` + download link |
-| PDF | `<embed>` + download link |
-| Plain text | `<pre>` + download link |
-| Other binary | Download link only |
+Folder entries are listed from authenticated range reads. Selecting one file decrypts only that entry’s ZIP ranges.
 
 ## Development
 
 ```sh
-pnpm dev        # Vite dev server at http://localhost:5173
-pnpm build      # Single-file output → dist/index.html
-pnpm test       # Vitest unit tests
-pnpm typecheck  # TypeScript type-check
+pnpm dev
+pnpm build
+pnpm test
+pnpm typecheck
 ```
 
-## How it works
+## Modules
 
-1. `fragment.ts` — parses and builds `#url=...&pw=...` URL fragments
-2. `decrypt.ts` — fetches the blob, reads the PBKDF2 salt from the envelope's `appMetadata`, derives the 256-bit CEK (600 000 iterations, SHA-256), and calls `foc-encryption`'s `decrypt`
-3. `render.ts` — detects content type from magic bytes and renders accordingly
-4. `ui.ts` — minimal DOM helpers for form, password prompt, loading state, and error display
-5. `main.ts` — entry point that routes between the three modes on page load
+1. `fragment.ts` parses and builds CID-only fragments.
+2. `protected-archive.ts` validates FEE/ZIP metadata and adapts authenticated plaintext ranges to zip.js.
+3. `decrypt.ts` bounds inline entry collection.
+4. `sandbox.ts` creates the locked HTML iframe.
+5. `save.ts` streams large entries to Chromium without a whole-file Blob.
+6. `render.ts` renders bounded content and supported progressive media.
+7. `ui.ts` owns the Evidence gate, password retry, folder tree, and save states.
+8. `main.ts` connects the CID, password, archive, entry, and renderer paths.
 
 ## Encryption format
 
-Blobs must be encrypted with `foc-encryption` and include a `pbkdf2_salt` field in `appMetadata`. Use `foc-demo` to produce compatible blobs.
-
-## Live Demo
-
-[**Open live demo**](https://bafybeifmoyptennzufqyp2id3ufa4yfyumrrz7ci4ok4sufwltggzy24nu.ipfs.dweb.link/#url=https%3A%2F%2Fcalib2.ezpdpz.net%2Fpiece%2Fbafkzcibeudqbmed2hq75hjwry67454ubmecbcqltv7mhvxh7yaw2ztvvqjbhjeeyei) — password: `hardPasswordSure`
-
-The viewer is hosted on IPFS. The encrypted blob is stored on Filecoin warm storage. Decryption happens entirely in your browser.
+Protected objects must use seekable chunked FEE encryption around a STORE ZIP and include `pbkdf2_salt`, `pbkdf2_iterations=600000`, `pbkdf2_hash=SHA-256`, `content_type=application/zip`, and integer `plaintext_size` app metadata.

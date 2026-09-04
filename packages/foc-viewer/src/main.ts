@@ -1,58 +1,55 @@
-import { fetchAndDecrypt } from './decrypt.js'
-import { buildFragment, parseFragment } from './fragment.js'
-import { detectContentType, renderContent } from './render.js'
-import { showConfirmation, showError, showForm, showLoading, showPasswordPrompt } from './ui.js'
+import type { ProtectedArchive, ProtectedEntry } from './protected-archive.js'
+import { MAX_INLINE_ENTRY_BYTES, readInlineEntry } from './decrypt.js'
+import { parseFragment } from './fragment.js'
+import { openProtectedArchive } from './protected-archive.js'
+import { detectContentType, renderContent, renderProgressiveMedia } from './render.js'
+import { saveEntry } from './save.js'
+import { showMissingLink, showPasswordPrompt, showProtectedArchive, showSaveEntry } from './ui.js'
 
-const container = document.getElementById('app') as HTMLElement
+function getContainer(): HTMLElement {
+  const element = document.getElementById('app')
+  if (!element) throw new Error('Viewer root is missing')
+  return element
+}
 
-async function runAutoDecrypt(url: string, password: string): Promise<void> {
-  showLoading(container)
-  try {
-    const data = await fetchAndDecrypt(url, password)
-    const contentType = await detectContentType(data)
-    renderContent(container, data, contentType)
-  } catch (e) {
-    const message = e instanceof Error ? e.message : 'Unknown error'
-    showError(container, message)
+const container = getContainer()
+
+async function openAndRender(archive: ProtectedArchive, entry: ProtectedEntry): Promise<void> {
+  if (entry.directory) return
+  if (entry.size > MAX_INLINE_ENTRY_BYTES) {
+    const rendered = await renderProgressiveMedia(container, entry.contentType, () => archive.open(entry.path))
+    if (rendered) return
+
+    showSaveEntry(container, entry, () =>
+      saveEntry(
+        {
+          size: entry.size,
+          contentType: entry.contentType,
+          open: () => archive.open(entry.path),
+        },
+        entry.path.split('/').at(-1) ?? 'decrypted-content'
+      )
+    )
+    return
   }
+
+  const data = await readInlineEntry(await archive.open(entry.path), entry.size)
+  renderContent(container, data, await detectContentType(data))
+}
+
+async function unlockArchive(cid: string, password: string): Promise<void> {
+  const archive = await openProtectedArchive(cid, password)
+  showProtectedArchive(container, archive.list(), (entry) => openAndRender(archive, entry))
 }
 
 function init(): void {
   const fragment = parseFragment(window.location.hash)
-
-  if (fragment?.url && fragment.password !== undefined) {
-    // US1: Auto-decrypt from shared link (#url=...&pw=...)
-    runAutoDecrypt(fragment.url, fragment.password)
+  if (!fragment) {
+    showMissingLink(container)
     return
   }
 
-  if (fragment?.url) {
-    // US4: Password-prompt mode (#url=... only)
-    const blobUrl = fragment.url
-    showPasswordPrompt(container, blobUrl, async (password) => {
-      await runAutoDecrypt(blobUrl, password)
-      if (password) {
-        history.replaceState(null, '', buildFragment({ url: blobUrl, password }))
-      }
-    })
-    return
-  }
-
-  // US2: Manual entry form — no fragment
-  showForm(container, {
-    onViewContent: async (url, password) => {
-      await runAutoDecrypt(url, password)
-      if (url && password) {
-        history.replaceState(null, '', buildFragment({ url, password }))
-      }
-    },
-    onCopyLink: (url, password) => {
-      const link = window.location.origin + window.location.pathname + buildFragment({ url, password })
-      navigator.clipboard.writeText(link).then(() => {
-        showConfirmation(container, 'Link copied to clipboard!')
-      })
-    },
-  })
+  showPasswordPrompt(container, (password) => unlockArchive(fragment.cid, password))
 }
 
 init()

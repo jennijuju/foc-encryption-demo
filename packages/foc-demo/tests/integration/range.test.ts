@@ -1,18 +1,24 @@
+import type { Synapse } from '@filoz/synapse-sdk'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { CoseAlgorithm, encrypt } from 'foc-encryption'
+import { CoseAlgorithm, createHttpBlobFetcher, encrypt } from 'foc-encryption'
+import type { BlobFetcher } from 'foc-encryption'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('foc-encryption', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>()
+  return { ...actual, createHttpBlobFetcher: vi.fn() }
+})
 
 vi.mock('../../src/synapse.js', () => ({
   createSynapseClient: vi.fn(),
-  createBlobFetcher: vi.fn(),
 }))
 
 import { rangeDecrypt } from '../../src/commands/range.js'
-import { createBlobFetcher, createSynapseClient } from '../../src/synapse.js'
+import { createSynapseClient } from '../../src/synapse.js'
 
-function makeBlobFetcher(blob: Uint8Array) {
+function makeBlobFetcher(blob: Uint8Array): BlobFetcher {
   return {
     fetchEnvelope: vi.fn(async () => blob.slice(0, 4096)),
     fetchRange: vi.fn(async (offset: number, length: number) => blob.slice(offset, offset + length)),
@@ -44,7 +50,7 @@ describe('range command', () => {
     const blob = await encrypt(plaintext, keyBytes, { algorithm: CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM })
 
     const fetcher = makeBlobFetcher(blob)
-    vi.mocked(createBlobFetcher).mockReturnValue(fetcher as any)
+    vi.mocked(createHttpBlobFetcher).mockReturnValue(fetcher)
 
     const offset = 1024
     const length = 512
@@ -71,7 +77,7 @@ describe('range command', () => {
     const blob = await encrypt(plaintext, keyBytes, { algorithm: CoseAlgorithm.AES_256_GCM })
 
     const fetcher = makeBlobFetcher(blob)
-    vi.mocked(createBlobFetcher).mockReturnValue(fetcher as any)
+    vi.mocked(createHttpBlobFetcher).mockReturnValue(fetcher)
 
     await expect(
       rangeDecrypt({
@@ -94,16 +100,18 @@ describe('range command', () => {
     const fakeUrl = 'https://retrieval.example.com/piece/baga6ea4seaqtest'
     const mockGetPieceUrl = vi.fn().mockReturnValue(fakeUrl)
 
-    vi.mocked(createSynapseClient).mockReturnValue({
+    const synapse = {
       storage: {
         createContext: vi.fn().mockResolvedValue({
           getPieceUrl: mockGetPieceUrl,
         }),
       },
-    } as any)
+    }
+    // The SDK client surface is wider; this test exercises only storage.createContext.
+    vi.mocked(createSynapseClient).mockReturnValue(synapse as unknown as Synapse)
 
     const fetcher = makeBlobFetcher(blob)
-    vi.mocked(createBlobFetcher).mockReturnValue(fetcher as any)
+    vi.mocked(createHttpBlobFetcher).mockReturnValue(fetcher)
 
     const outputPath = join(tempDir, 'cid-range.bin')
     await rangeDecrypt({
@@ -118,7 +126,7 @@ describe('range command', () => {
     const result = await readFile(outputPath)
     expect(new Uint8Array(result)).toEqual(plaintext.slice(0, 100))
     expect(createSynapseClient).toHaveBeenCalledWith(expect.objectContaining({ privateKey: '0x' + 'ab'.repeat(32) }))
-    expect(createBlobFetcher).toHaveBeenCalledWith(fakeUrl)
+    expect(createHttpBlobFetcher).toHaveBeenCalledWith(fakeUrl)
   })
 
   it('throws error when PieceCID locator used without private key', async () => {

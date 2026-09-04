@@ -6,6 +6,7 @@ import type { DecryptMetadata, EncStructureContext, EncryptResult, EncryptionSch
 const BASE_NONCE_LENGTH = 7
 const AES_GCM_TAG_LENGTH = 16
 const DEFAULT_CHUNK_SIZE = 262144 // 256 KiB
+const MAX_CHUNK_SIZE = 16 * 1024 * 1024
 const MAX_CHUNK_INDEX = 0xffffffff // 4-byte counter max
 
 export interface ChunkedEncryptParams {
@@ -20,7 +21,26 @@ export class ChunkedAes256GcmStream implements EncryptionScheme {
   private chunkSize: number
 
   constructor(params?: ChunkedEncryptParams) {
-    this.chunkSize = params?.chunkSize ?? DEFAULT_CHUNK_SIZE
+    const chunkSize = params?.chunkSize ?? DEFAULT_CHUNK_SIZE
+    if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0 || chunkSize > MAX_CHUNK_SIZE) {
+      throw new FocEncryptionError(
+        `Chunk size must be a positive safe integer no larger than ${MAX_CHUNK_SIZE}, got ${chunkSize}`
+      )
+    }
+    this.chunkSize = chunkSize
+  }
+
+  private createEncryptionMetadata(plaintextLength: number): { iv: Uint8Array; chunkCount: number } {
+    if (!Number.isSafeInteger(plaintextLength) || plaintextLength < 0) {
+      throw new FocEncryptionError(`Plaintext length must be a non-negative safe integer, got ${plaintextLength}`)
+    }
+    const chunkCount = Math.max(1, Math.ceil(plaintextLength / this.chunkSize))
+    if (chunkCount - 1 > MAX_CHUNK_INDEX) {
+      throw new FocEncryptionError(
+        `Plaintext too large: ${chunkCount} chunks exceeds the 4-byte counter maximum (${MAX_CHUNK_INDEX + 1})`
+      )
+    }
+    return { iv: getRandomValues(BASE_NONCE_LENGTH), chunkCount }
   }
 
   async encrypt(
@@ -29,13 +49,7 @@ export class ChunkedAes256GcmStream implements EncryptionScheme {
     protectedHeaders: Uint8Array,
     context: EncStructureContext
   ): Promise<EncryptResult> {
-    const baseNonce = getRandomValues(BASE_NONCE_LENGTH)
-    const chunkCount = Math.max(1, Math.ceil(plaintext.length / this.chunkSize))
-    if (chunkCount - 1 > MAX_CHUNK_INDEX) {
-      throw new FocEncryptionError(
-        `Plaintext too large: ${chunkCount} chunks exceeds the 4-byte counter maximum (${MAX_CHUNK_INDEX + 1})`
-      )
-    }
+    const { iv: baseNonce, chunkCount } = this.createEncryptionMetadata(plaintext.length)
 
     const chunks: Uint8Array[] = []
     for (let i = 0; i < chunkCount; i++) {
@@ -65,6 +79,125 @@ export class ChunkedAes256GcmStream implements EncryptionScheme {
       chunkSize: this.chunkSize,
       chunkCount,
     }
+  }
+
+  encryptStream(
+    key: CryptoKey,
+    plaintext: ReadableStream<Uint8Array>,
+    plaintextLength: number,
+    protectedHeaders: Uint8Array,
+    context: EncStructureContext
+  ): {
+    ciphertext: ReadableStream<Uint8Array>
+    iv: Uint8Array
+    chunkSize: number
+    chunkCount: number
+  } {
+    const { iv, chunkCount } = this.createEncryptionMetadata(plaintextLength)
+    const reader = plaintext.getReader()
+    const aad = buildEncStructure(context, protectedHeaders, new Uint8Array(0))
+    let sourceChunk: Uint8Array | undefined
+    let sourceOffset = 0
+    let chunkIndex = 0
+    let readerReleased = false
+
+    const releaseReader = () => {
+      if (!readerReleased) {
+        reader.releaseLock()
+        readerReleased = true
+      }
+    }
+
+    const cancelSource = async (reason: unknown) => {
+      if (readerReleased) return
+      sourceChunk?.fill(0)
+      sourceChunk = undefined
+      try {
+        await reader.cancel(reason)
+      } catch {
+        // Preserve the encryption or consumer-cancellation reason.
+      } finally {
+        releaseReader()
+      }
+    }
+
+    const readPlaintextChunk = async (length: number): Promise<Uint8Array> => {
+      const chunk = new Uint8Array(length)
+      let written = 0
+      while (written < length) {
+        if (!sourceChunk) {
+          const next = await reader.read()
+          if (next.done) {
+            chunk.fill(0)
+            throw new FocEncryptionError(
+              `Plaintext ended early: expected ${plaintextLength} bytes, received ${chunkIndex * this.chunkSize + written}`
+            )
+          }
+          if (next.value.length === 0) continue
+          sourceChunk = next.value
+          sourceOffset = 0
+        }
+
+        const currentSourceChunk = sourceChunk
+        if (!currentSourceChunk) continue
+        const copyLength = Math.min(length - written, currentSourceChunk.length - sourceOffset)
+        chunk.set(currentSourceChunk.subarray(sourceOffset, sourceOffset + copyLength), written)
+        sourceOffset += copyLength
+        written += copyLength
+        if (sourceOffset === currentSourceChunk.length) {
+          sourceChunk = undefined
+          sourceOffset = 0
+        }
+      }
+      return chunk
+    }
+
+    const requireSourceEnd = async () => {
+      if (sourceChunk && sourceOffset < sourceChunk.length) {
+        throw new FocEncryptionError(`Plaintext exceeds declared length of ${plaintextLength} bytes`)
+      }
+      sourceChunk = undefined
+      sourceOffset = 0
+      while (true) {
+        const next = await reader.read()
+        if (next.done) return
+        if (next.value.length > 0) {
+          sourceChunk = next.value
+          throw new FocEncryptionError(`Plaintext exceeds declared length of ${plaintextLength} bytes`)
+        }
+      }
+    }
+
+    const ciphertext = new ReadableStream<Uint8Array>(
+      {
+        pull: async (controller) => {
+          const isLast = chunkIndex === chunkCount - 1
+          const chunkLength = isLast ? plaintextLength - chunkIndex * this.chunkSize : this.chunkSize
+          let chunk: Uint8Array | undefined
+          try {
+            chunk = await readPlaintextChunk(chunkLength)
+            if (isLast) await requireSourceEnd()
+            const nonce = deriveChunkNonce(iv, chunkIndex, isLast)
+            const encrypted = await aesGcmEncrypt(key, nonce, chunk, aad)
+            controller.enqueue(encrypted)
+            chunkIndex += 1
+            if (isLast) {
+              releaseReader()
+              controller.close()
+            }
+          } catch (error) {
+            await cancelSource(error)
+            controller.error(error)
+          } finally {
+            chunk?.fill(0)
+          }
+        },
+        cancel: cancelSource,
+      },
+      { highWaterMark: 0 }
+    )
+
+    return { ciphertext, iv, chunkSize: this.chunkSize, chunkCount }
   }
 
   async decrypt(
@@ -187,4 +320,4 @@ function deriveChunkNonce(baseNonce: Uint8Array, chunkIndex: number, isLast: boo
   return nonce
 }
 
-export { DEFAULT_CHUNK_SIZE, AES_GCM_TAG_LENGTH, BASE_NONCE_LENGTH, MAX_CHUNK_INDEX, deriveChunkNonce }
+export { DEFAULT_CHUNK_SIZE, MAX_CHUNK_SIZE, AES_GCM_TAG_LENGTH, BASE_NONCE_LENGTH, MAX_CHUNK_INDEX, deriveChunkNonce }

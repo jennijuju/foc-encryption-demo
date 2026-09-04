@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@zip.js/zip.js": "2.8.11",
     "foc-encryption": "workspace:*",
     "magic-bytes.js": "^1.13.0"
   },
