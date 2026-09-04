@@ -36,10 +36,6 @@ export type {
   EncryptOptions,
   /** Parsed envelope metadata — available without a decryption key. */
   EnvelopeMetadata,
-  /** Recipient descriptor for multi-recipient encryption (COSE_Encrypt). */
-  Recipient,
-  /** Read-only view of a parsed recipient descriptor. */
-  RecipientInfo,
   /** Options for simple (non-seekable) encryption. */
   SimpleEncryptOptions,
   /** Options for bounded-memory chunked encryption from a byte stream. */

@@ -1,6 +1,6 @@
 import * as cborg from 'cborg'
 import { describe, expect, it } from 'vitest'
-import { COSE_HEADER_ALG, COSE_HEADER_TYP, CoseAlgorithm, FOC_ENVELOPE_TYPE } from '../../src/cose/headers.js'
+import { COSE_HEADER_ALG, COSE_HEADER_TYP, CoseAlgorithm, FEE_ENVELOPE_TYPE } from '../../src/cose/headers.js'
 import { coseDecodeOptions } from '../../src/cose/tags.js'
 import { decrypt, encrypt, parseEnvelope } from '../../src/envelope.js'
 import { AuthenticationError, MalformedEnvelopeError, UnsupportedSchemeError } from '../../src/errors.js'
@@ -31,7 +31,7 @@ describe('encrypt integration', () => {
 
     const protectedMap = cborg.decode(arr[0], { useMaps: true }) as Map<number, unknown>
     expect(protectedMap.get(COSE_HEADER_ALG)).toBe(3)
-    expect(protectedMap.get(COSE_HEADER_TYP)).toBe(FOC_ENVELOPE_TYPE)
+    expect(protectedMap.get(COSE_HEADER_TYP)).toBe(FEE_ENVELOPE_TYPE)
 
     expect(remainder.length).toBe(plaintext.length + 16)
   })
@@ -182,11 +182,11 @@ describe('edge cases', () => {
 
   it('plaintext exactly chunk_size round-trip (chunked)', async () => {
     const cek = crypto.getRandomValues(new Uint8Array(32))
-    const plaintext = new Uint8Array(64).fill(0xab)
+    const plaintext = new Uint8Array(4096).fill(0xab)
 
     const blob = await encrypt(plaintext, cek, {
       algorithm: CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM,
-      chunkSize: 64,
+      chunkSize: 4096,
     })
     const decrypted = await decrypt(blob, cek)
     expect(decrypted).toEqual(plaintext)
@@ -194,11 +194,11 @@ describe('edge cases', () => {
 
   it('plaintext exactly N*chunk_size (no partial last chunk)', async () => {
     const cek = crypto.getRandomValues(new Uint8Array(32))
-    const plaintext = new Uint8Array(128).fill(0xcd)
+    const plaintext = new Uint8Array(8192).fill(0xcd)
 
     const blob = await encrypt(plaintext, cek, {
       algorithm: CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM,
-      chunkSize: 64,
+      chunkSize: 4096,
     })
     const decrypted = await decrypt(blob, cek)
     expect(decrypted).toEqual(plaintext)

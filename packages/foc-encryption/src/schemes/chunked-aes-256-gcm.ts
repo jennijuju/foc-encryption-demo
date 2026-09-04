@@ -6,6 +6,7 @@ import type { DecryptMetadata, EncStructureContext, EncryptResult, EncryptionSch
 const BASE_NONCE_LENGTH = 7
 const AES_GCM_TAG_LENGTH = 16
 const DEFAULT_CHUNK_SIZE = 262144 // 256 KiB
+const MIN_CHUNK_SIZE = 4096 // 4 KiB
 const MAX_CHUNK_SIZE = 16 * 1024 * 1024
 const MAX_CHUNK_INDEX = 0xffffffff // 4-byte counter max
 
@@ -320,4 +321,12 @@ function deriveChunkNonce(baseNonce: Uint8Array, chunkIndex: number, isLast: boo
   return nonce
 }
 
-export { DEFAULT_CHUNK_SIZE, MAX_CHUNK_SIZE, AES_GCM_TAG_LENGTH, BASE_NONCE_LENGTH, MAX_CHUNK_INDEX, deriveChunkNonce }
+export {
+  DEFAULT_CHUNK_SIZE,
+  MIN_CHUNK_SIZE,
+  MAX_CHUNK_SIZE,
+  AES_GCM_TAG_LENGTH,
+  BASE_NONCE_LENGTH,
+  MAX_CHUNK_INDEX,
+  deriveChunkNonce,
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CoseAlgorithm, MAX_CHUNK_SIZE, decrypt, decryptRange, encryptStream, parseEnvelope } from '../../src/index.js'
-import type { BlobFetcher, Recipient, StreamEncryptOptions } from '../../src/index.js'
+import type { BlobFetcher, StreamEncryptOptions } from '../../src/index.js'
 
 const KiB = 1024
 const MiB = 1024 * KiB
@@ -42,9 +42,8 @@ function streamFromChunks(chunks: readonly Uint8Array[]): ReadableStream<Uint8Ar
 }
 
 function makeBlobFetcher(blob: Uint8Array): BlobFetcher {
-  const metadata = parseEnvelope(blob)
   return {
-    fetchEnvelope: async () => blob.slice(0, metadata.envelopeSize),
+    getSize: async () => blob.length,
     fetchRange: async (offset, length) => blob.slice(offset, offset + length),
   }
 }
@@ -58,7 +57,7 @@ async function expectLengthError(
   const encrypted = await encryptStream(source, cek, {
     algorithm: CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM,
     plaintextLength,
-    chunkSize: 4,
+    chunkSize: CHUNK_SIZE,
   })
   const reader = encrypted.getReader()
   const envelope = await reader.read()
@@ -157,26 +156,6 @@ describe('encryptStream', () => {
     expect(requests.every((length) => length <= MAX_CHUNK_SIZE + 16)).toBe(true)
   })
 
-  it('uses the COSE_Encrypt authentication context when recipients are present', async () => {
-    const plaintext = new Uint8Array([1, 2, 3, 4, 5])
-    const cek = crypto.getRandomValues(new Uint8Array(32))
-    const recipients: Recipient[] = [{ algorithm: -3, wrappedKey: new Uint8Array([6, 7, 8]) }]
-    const blob = await collect(
-      await encryptStream(
-        streamFromChunks([plaintext]),
-        cek,
-        {
-          algorithm: CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM,
-          plaintextLength: plaintext.length,
-          chunkSize: 4,
-        },
-        recipients
-      )
-    )
-
-    expect(parseEnvelope(blob).tag).toBe(96)
-    expect(await decrypt(blob, cek)).toEqual(plaintext)
-  })
 
   it('rejects early EOF before emitting a final encrypted chunk', async () => {
     await expectLengthError(streamFromChunks([new Uint8Array([1, 2, 3])]), 4, /ended early/)
@@ -253,7 +232,7 @@ describe('encryptStream', () => {
 
     const first = await reader.read()
     if (first.done) throw new Error('Expected the COSE envelope before ciphertext')
-    expect(parseEnvelope(first.value).envelopeSize).toBe(first.value.length)
+    expect(first.value.length).toBeGreaterThan(0)
     await reader.cancel('consumer stopped')
     expect(cancellationReason).toBe('consumer stopped')
   })

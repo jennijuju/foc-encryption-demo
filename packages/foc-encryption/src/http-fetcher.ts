@@ -73,8 +73,14 @@ export function createHttpBlobFetcher(url: string, fetchFn: typeof fetch = fetch
     return readBoundedBody(response, responseEnd - responseStart + 1)
   }
 
+  async function getSize(): Promise<number> {
+    if (totalSize === undefined) await readRange(0, 1)
+    if (totalSize === undefined) throw new Error('Gateway did not report total size')
+    return totalSize
+  }
+
   return {
-    fetchEnvelope: () => readRange(0, 4096),
+    getSize,
     fetchRange: readRange,
   }
 }

@@ -15,32 +15,34 @@ function partialResponse(start = 0, body = bytes, total = 10): Response {
 }
 
 describe('createHttpBlobFetcher', () => {
-  it('fetches the envelope and ciphertext with byte ranges', async () => {
+  it('fetches total size and ciphertext with byte ranges', async () => {
     const fetchFn = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       const range = new Headers(init?.headers).get('Range')
-      return range === 'bytes=7-9' ? partialResponse(7) : partialResponse()
+      if (range === 'bytes=0-0') return partialResponse(0, bytes.slice(0, 1))
+      return partialResponse(7)
     }) as unknown as typeof fetch
     const fetcher = createHttpBlobFetcher('https://example.test/blob', fetchFn)
 
-    await expect(fetcher.fetchEnvelope()).resolves.toEqual(bytes)
+    await expect(fetcher.getSize()).resolves.toBe(10)
     await expect(fetcher.fetchRange(7, 3)).resolves.toEqual(bytes)
 
     expect(fetchFn).toHaveBeenNthCalledWith(1, 'https://example.test/blob', {
-      headers: { Range: 'bytes=0-4095' },
+      headers: { Range: 'bytes=0-0' },
     })
     expect(fetchFn).toHaveBeenNthCalledWith(2, 'https://example.test/blob', {
       headers: { Range: 'bytes=7-9' },
     })
   })
 
-  it('clamps later ranges to the total learned from the envelope response', async () => {
+  it('clamps later ranges to the learned total size', async () => {
     const fetchFn = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
       const range = new Headers(init?.headers).get('Range')
-      return range === 'bytes=7-9' ? partialResponse(7) : partialResponse()
+      if (range === 'bytes=0-0') return partialResponse(0, bytes.slice(0, 1))
+      return partialResponse(7)
     }) as unknown as typeof fetch
     const fetcher = createHttpBlobFetcher('https://example.test/blob', fetchFn)
 
-    await fetcher.fetchEnvelope()
+    await fetcher.getSize()
     await expect(fetcher.fetchRange(7, 100)).resolves.toEqual(bytes)
 
     expect(fetchFn).toHaveBeenNthCalledWith(2, 'https://example.test/blob', {
@@ -52,7 +54,7 @@ describe('createHttpBlobFetcher', () => {
     const fetchFn = vi.fn(async () => new Response(bytes, { status: 200 })) as unknown as typeof fetch
     const fetcher = createHttpBlobFetcher('https://example.test/blob', fetchFn)
 
-    await expect(fetcher.fetchEnvelope()).rejects.toThrow('Gateway does not support byte-range retrieval')
+    await expect(fetcher.getSize()).rejects.toThrow('Gateway does not support byte-range retrieval')
   })
 
   it('rejects a mismatched Content-Range', async () => {

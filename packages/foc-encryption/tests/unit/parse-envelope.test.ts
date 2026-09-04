@@ -3,7 +3,6 @@ import { CoseAlgorithm } from '../../src/cose/headers.js'
 import { encrypt } from '../../src/envelope.js'
 import { parseEnvelope } from '../../src/envelope.js'
 import { MalformedEnvelopeError } from '../../src/errors.js'
-import type { Recipient } from '../../src/types.js'
 
 describe('parseEnvelope', () => {
   it('parses simple envelope metadata (alg, iv, seekable=false, envelopeSize)', async () => {
@@ -18,27 +17,25 @@ describe('parseEnvelope', () => {
     expect(metadata.seekable).toBe(false)
     expect(metadata.iv.length).toBe(12)
     expect(metadata.envelopeSize).toBeGreaterThan(0)
-    expect(metadata.recipients).toHaveLength(0)
     expect(metadata.chunkSize).toBeUndefined()
     expect(metadata.chunkCount).toBeUndefined()
   })
 
-  it('parses chunked envelope metadata (chunkSize, chunkCount, seekable=true)', async () => {
+  it('parses chunked envelope metadata with derived chunk count', async () => {
     const cek = crypto.getRandomValues(new Uint8Array(32))
-    const plaintext = new Uint8Array(200).fill(0x42)
+    const plaintext = new Uint8Array(10_000).fill(0x42)
 
     const blob = await encrypt(plaintext, cek, {
       algorithm: CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM,
-      chunkSize: 64,
+      chunkSize: 4096,
     })
     const metadata = parseEnvelope(blob)
 
     expect(metadata.algorithm).toBe(-65793)
     expect(metadata.seekable).toBe(true)
     expect(metadata.iv.length).toBe(7)
-    expect(metadata.chunkSize).toBe(64)
-    expect(metadata.chunkCount).toBe(4)
-    expect(metadata.recipients).toHaveLength(0)
+    expect(metadata.chunkSize).toBe(4096)
+    expect(metadata.chunkCount).toBe(3)
   })
 
   it('parses app_metadata with CID', async () => {
@@ -56,22 +53,6 @@ describe('parseEnvelope', () => {
     expect(new Uint8Array(metadata.appMetadata?.cid as Uint8Array)).toEqual(cid)
   })
 
-  it('parses multi-recipient envelope (recipients array)', async () => {
-    const cek = crypto.getRandomValues(new Uint8Array(32))
-    const plaintext = new TextEncoder().encode('test')
-    const recipients: Recipient[] = [
-      { algorithm: -3, keyId: new TextEncoder().encode('alice'), wrappedKey: new Uint8Array([1, 2]) },
-      { algorithm: -3, keyId: new TextEncoder().encode('bob'), wrappedKey: new Uint8Array([3, 4]) },
-    ]
-
-    const blob = await encrypt(plaintext, cek, { algorithm: CoseAlgorithm.AES_256_GCM }, recipients)
-    const metadata = parseEnvelope(blob)
-
-    expect(metadata.tag).toBe(96)
-    expect(metadata.recipients).toHaveLength(2)
-    expect(metadata.recipients[0].algorithm).toBe(-3)
-    expect(metadata.recipients[1].algorithm).toBe(-3)
-  })
 
   it('malformed blob throws MalformedEnvelopeError', () => {
     const garbage = new Uint8Array([0xff, 0xfe, 0xfd])
