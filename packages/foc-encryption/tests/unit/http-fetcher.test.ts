@@ -33,6 +33,21 @@ describe('createHttpBlobFetcher', () => {
     })
   })
 
+  it('clamps later ranges to the total learned from the envelope response', async () => {
+    const fetchFn = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const range = new Headers(init?.headers).get('Range')
+      return range === 'bytes=7-9' ? partialResponse(7) : partialResponse()
+    }) as unknown as typeof fetch
+    const fetcher = createHttpBlobFetcher('https://example.test/blob', fetchFn)
+
+    await fetcher.fetchEnvelope()
+    await expect(fetcher.fetchRange(7, 100)).resolves.toEqual(bytes)
+
+    expect(fetchFn).toHaveBeenNthCalledWith(2, 'https://example.test/blob', {
+      headers: { Range: 'bytes=7-9' },
+    })
+  })
+
   it('rejects gateways that ignore range requests', async () => {
     const fetchFn = vi.fn(async () => new Response(bytes, { status: 200 })) as unknown as typeof fetch
     const fetcher = createHttpBlobFetcher('https://example.test/blob', fetchFn)

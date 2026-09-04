@@ -34,6 +34,7 @@ async function readBoundedBody(response: Response, expectedLength: number): Prom
 }
 
 export function createHttpBlobFetcher(url: string, fetchFn: typeof fetch = fetch): BlobFetcher {
+  let totalSize: number | undefined
   async function readRange(offset: number, length: number): Promise<Uint8Array> {
     if (
       !Number.isSafeInteger(offset) ||
@@ -45,10 +46,12 @@ export function createHttpBlobFetcher(url: string, fetchFn: typeof fetch = fetch
       throw new Error('Invalid byte range')
     }
 
-    const end = offset + length - 1
-    if (!Number.isSafeInteger(end)) {
+    const requestedEnd = offset + length - 1
+    if (!Number.isSafeInteger(requestedEnd)) {
       throw new Error('Invalid byte range')
     }
+    if (totalSize !== undefined && offset >= totalSize) return new Uint8Array()
+    const end = totalSize === undefined ? requestedEnd : Math.min(requestedEnd, totalSize - 1)
 
     const response = await fetchFn(url, { headers: { Range: `bytes=${offset}-${end}` } })
     if (response.status !== 206) {
@@ -60,6 +63,10 @@ export function createHttpBlobFetcher(url: string, fetchFn: typeof fetch = fetch
     const responseStart = Number(match[1])
     const responseEnd = Number(match[2])
     const total = Number(match[3])
+    if (totalSize !== undefined && total !== totalSize) {
+      throw new Error('Gateway returned an inconsistent total size')
+    }
+    totalSize = total
     if (responseStart !== offset || responseEnd < responseStart || responseEnd > end || total <= responseEnd) {
       throw new Error('Gateway returned an invalid Content-Range')
     }

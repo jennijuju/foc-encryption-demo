@@ -1,5 +1,20 @@
 import type { ProtectedEntry } from './protected-archive.js'
 
+const PASSWORD_ERROR = 'That password could not decrypt this share. Check all six words and try again.'
+const LOAD_ERROR = 'This share could not be loaded yet. It may still be propagating; try again shortly.'
+
+export function unlockErrorMessage(cause: unknown): string {
+  if (
+    cause instanceof Error &&
+    (cause.name === 'AuthenticationError' ||
+      cause.message.includes('AEAD authentication failed') ||
+      cause.message === 'Wrong password')
+  ) {
+    return PASSWORD_ERROR
+  }
+  return LOAD_ERROR
+}
+
 export function showPasswordPrompt(container: HTMLElement, onSubmit: (password: string) => Promise<void>): void {
   container.innerHTML = `
     <div class="evidence-gate">
@@ -15,7 +30,12 @@ export function showPasswordPrompt(container: HTMLElement, onSubmit: (password: 
       </section>
       <form class="password-form">
         <label for="pw-input">Password</label>
-        <input type="password" id="pw-input" autocomplete="off" placeholder="Six words" />
+        <div class="password-input">
+          <input type="password" id="pw-input" autocomplete="off" placeholder="Six words" />
+          <button class="password-toggle" id="password-toggle" type="button" aria-label="Show password" aria-pressed="false">
+            <span aria-hidden="true">👁</span>
+          </button>
+        </div>
         <button class="btn-primary" id="view-btn" type="submit">Unlock</button>
         <p class="hint">The password is never added to this address.</p>
         <p class="error" id="error" role="alert" hidden></p>
@@ -26,8 +46,21 @@ export function showPasswordPrompt(container: HTMLElement, onSubmit: (password: 
   const form = container.querySelector('form') as HTMLFormElement
   const passwordInput = container.querySelector('#pw-input') as HTMLInputElement
   const button = container.querySelector('#view-btn') as HTMLButtonElement
+  const passwordToggle = container.querySelector('#password-toggle') as HTMLButtonElement
   const error = container.querySelector('#error') as HTMLParagraphElement
   passwordInput.focus()
+
+  passwordToggle.addEventListener('click', () => {
+    const showPassword = passwordInput.type === 'password'
+    const { selectionStart, selectionEnd } = passwordInput
+    passwordInput.type = showPassword ? 'text' : 'password'
+    passwordToggle.setAttribute('aria-label', showPassword ? 'Hide password' : 'Show password')
+    passwordToggle.setAttribute('aria-pressed', String(showPassword))
+    passwordInput.focus()
+    if (selectionStart !== null && selectionEnd !== null) {
+      passwordInput.setSelectionRange(selectionStart, selectionEnd)
+    }
+  })
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault()
@@ -44,10 +77,10 @@ export function showPasswordPrompt(container: HTMLElement, onSubmit: (password: 
     error.hidden = true
     try {
       await onSubmit(passwordInput.value)
-    } catch {
-      error.textContent = 'That password could not decrypt this share. Check all six words and try again.'
+    } catch (cause) {
+      error.textContent = unlockErrorMessage(cause)
       error.hidden = false
-      passwordInput.select()
+      if (error.textContent === PASSWORD_ERROR) passwordInput.select()
     } finally {
       button.disabled = false
       button.textContent = 'Unlock'
