@@ -1,11 +1,10 @@
-import { randomInt } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { constants, createReadStream, createWriteStream } from 'node:fs'
-import { chmod, lstat, mkdtemp, open, readdir, realpath, rm, stat } from 'node:fs/promises'
+import { chmod, link, lstat, mkdtemp, open, readdir, realpath, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path'
+import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import { finished } from 'node:stream/promises'
-import { wordlist } from '@scure/bip39/wordlists/english'
 import { ZipWriter } from '@zip.js/zip.js'
 import { CoseAlgorithm, deriveKey, encryptStream } from 'foc-encryption'
 
@@ -19,10 +18,8 @@ const FILE_READ_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW
 export interface ProtectPathOptions {
   input: string
   output: string
-  password?: string
-  passwordOutput?: NodeJS.WritableStream
+  accessKeyOutput: NodeJS.WritableStream
 }
-
 export interface ProtectResult {
   output: string
   sourceBytes: number
@@ -139,17 +136,17 @@ export async function collectArchiveEntries(input: string): Promise<ArchiveEntry
   )
 }
 
-export function generatePassword(): string {
-  return Array.from({ length: 6 }, () => wordlist[randomInt(wordlist.length)]).join('-')
+export function generateAccessKey(): string {
+  return `engram_${randomBytes(32).toString('base64url')}`
 }
 
-async function writeGeneratedPassword(output: NodeJS.WritableStream, password: string): Promise<void> {
-  await new Promise<void>((resolveWrite, reject) => {
-    output.write(password, (error) => {
-      if (error) reject(error)
-      else resolveWrite()
-    })
+async function writeGeneratedAccessKey(output: NodeJS.WritableStream, accessKey: string): Promise<void> {
+  const { promise, resolve, reject } = Promise.withResolvers<void>()
+  output.write(accessKey, (error) => {
+    if (error) reject(error)
+    else resolve()
   })
+  await promise
 }
 
 export async function writeZip(entries: ArchiveEntry[], outputPath: string): Promise<number> {
@@ -208,16 +205,28 @@ export async function writeZip(entries: ArchiveEntry[], outputPath: string): Pro
   return (await stat(outputPath)).size
 }
 
+async function writeEncryptedOutput(outputPath: string, encrypted: ReadableStream<Uint8Array>): Promise<void> {
+  const temporaryPath = join(dirname(outputPath), `.${basename(outputPath)}.${randomUUID()}.tmp`)
+  const handle = await open(temporaryPath, 'wx', 0o600)
+  const output = createWriteStream('', { fd: handle.fd, autoClose: false })
+  try {
+    await encrypted.pipeTo(Writable.toWeb(output) as WritableStream<Uint8Array>)
+    await handle.sync()
+    await handle.close()
+    await link(temporaryPath, outputPath)
+  } catch (error) {
+    output.destroy()
+    await handle.close().catch(() => undefined)
+    throw error
+  } finally {
+    await rm(temporaryPath, { force: true }).catch(() => undefined)
+  }
+}
+
 export async function protectPath(options: ProtectPathOptions): Promise<ProtectResult> {
   if (!options.input || !options.output) throw new Error('Input and output paths are required')
   if (resolve(options.input) === resolve(options.output)) throw new Error('Input and output paths must differ')
-  if (options.password !== undefined && options.passwordOutput !== undefined) {
-    throw new Error('Provide a password or a password output, not both')
-  }
-  if (options.password === '') throw new Error('Password must not be empty')
-  if (options.password === undefined && options.passwordOutput === undefined) {
-    throw new Error('A password output is required when generating a password')
-  }
+  if (!options.accessKeyOutput) throw new Error('An access key output is required')
 
   const entries = await collectArchiveEntries(options.input)
   const sourceBytes = entries.reduce((total, entry) => total + entry.size, 0)
@@ -226,8 +235,8 @@ export async function protectPath(options: ProtectPathOptions): Promise<ProtectR
     throw new Error(`Input has more than ${MAX_ARCHIVE_ENTRIES} entries`)
   }
 
-  const password = options.password ?? generatePassword()
-  if (options.passwordOutput) await writeGeneratedPassword(options.passwordOutput, password)
+  const accessKey = generateAccessKey()
+  await writeGeneratedAccessKey(options.accessKeyOutput, accessKey)
 
   const tempDirectory = await mkdtemp(join(tmpdir(), TEMP_PREFIX))
   try {
@@ -235,7 +244,7 @@ export async function protectPath(options: ProtectPathOptions): Promise<ProtectR
     const zipPath = join(tempDirectory, 'payload.zip')
     const plaintextSize = await writeZip(entries, zipPath)
     if (!Number.isSafeInteger(plaintextSize)) throw new Error('ZIP is too large to represent safely')
-    const derived = await deriveKey({ kind: 'password', password })
+    const derived = await deriveKey({ kind: 'password', password: accessKey })
     if (!derived.salt) {
       derived.cek.fill(0)
       throw new Error('Password derivation did not return a salt')
@@ -254,9 +263,7 @@ export async function protectPath(options: ProtectPathOptions): Promise<ProtectR
           plaintext_size: plaintextSize,
         },
       })
-      const nodeOutput = createWriteStream(options.output, { flags: 'wx', mode: 0o600 })
-      await encrypted.pipeTo(Writable.toWeb(nodeOutput) as WritableStream<Uint8Array>)
-      await chmod(options.output, 0o600)
+      await writeEncryptedOutput(options.output, encrypted)
     } finally {
       derived.cek.fill(0)
     }

@@ -1,5 +1,4 @@
-import { Buffer } from 'node:buffer'
-import { createReadStream, createWriteStream } from 'node:fs'
+import { createWriteStream } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -15,19 +14,6 @@ function parseInheritedFd(value: string | undefined, flag: string): number | und
   return fd
 }
 
-async function readPassword(fd: number): Promise<string> {
-  const input = createReadStream('', { fd })
-  const decoder = new TextDecoder('utf-8', { fatal: true })
-  let password = ''
-  for await (const chunk of input) {
-    const bytes = chunk instanceof Uint8Array ? chunk : Buffer.from(String(chunk))
-    password += decoder.decode(bytes, { stream: true })
-  }
-  password += decoder.decode()
-  password = password.replace(/\r?\n$/, '')
-  if (!password) throw new Error('Password input must not be empty')
-  return password
-}
 
 export async function main(args: string[] = process.argv.slice(2)): Promise<void> {
   const { values } = parseArgs({
@@ -37,30 +23,26 @@ export async function main(args: string[] = process.argv.slice(2)): Promise<void
     options: {
       input: { type: 'string' },
       output: { type: 'string' },
-      'password-input-fd': { type: 'string' },
-      'password-output-fd': { type: 'string' },
+      'access-key-output-fd': { type: 'string' },
     },
   })
 
   if (!values.input || !values.output) throw new Error('--input and --output are required')
-  const passwordInputFd = parseInheritedFd(values['password-input-fd'], '--password-input-fd')
-  const passwordOutputFd = parseInheritedFd(values['password-output-fd'], '--password-output-fd')
-  if ((passwordInputFd === undefined) === (passwordOutputFd === undefined)) {
-    throw new Error('Provide exactly one of --password-input-fd or --password-output-fd')
+  const accessKeyOutputFd = parseInheritedFd(values['access-key-output-fd'], '--access-key-output-fd')
+  if (accessKeyOutputFd === undefined) {
+    throw new Error('--access-key-output-fd is required')
   }
 
-  const password = passwordInputFd === undefined ? undefined : await readPassword(passwordInputFd)
-  const passwordOutput = passwordOutputFd === undefined ? undefined : createWriteStream('', { fd: passwordOutputFd })
+  const accessKeyOutput = createWriteStream('', { fd: accessKeyOutputFd })
   try {
     const result = await protectPath({
       input: values.input,
       output: values.output,
-      password,
-      passwordOutput,
+      accessKeyOutput,
     })
     process.stdout.write(`${JSON.stringify(result)}\n`)
   } finally {
-    passwordOutput?.end()
+    accessKeyOutput.end()
   }
 }
 
