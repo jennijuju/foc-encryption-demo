@@ -1,10 +1,15 @@
 export const MAX_INLINE_ENTRY_BYTES = 16 * 1024 * 1024
+export const MAX_BUFFERED_MEDIA_BYTES = 64 * 1024 * 1024
 
-export async function readInlineEntry(stream: ReadableStream<Uint8Array>, expectedSize: number): Promise<Uint8Array> {
+export async function readInlineEntry(
+  stream: ReadableStream<Uint8Array>,
+  expectedSize: number,
+  maxBytes = MAX_INLINE_ENTRY_BYTES
+): Promise<Uint8Array> {
   if (!Number.isSafeInteger(expectedSize) || expectedSize < 0) {
     throw new Error('Entry has an invalid size')
   }
-  if (expectedSize > MAX_INLINE_ENTRY_BYTES) {
+  if (expectedSize > maxBytes) {
     throw new Error('This entry is too large to preview in this browser.')
   }
 

@@ -50,6 +50,18 @@ export function renderContent(container: HTMLElement, data: Uint8Array, contentT
     return
   }
 
+  if (contentType.startsWith('audio/') || contentType.startsWith('video/')) {
+    const tag = contentType.startsWith('audio/') ? 'audio' : 'video'
+    container.classList.add('wide')
+    container.innerHTML = `
+      <div class="content-wrapper">
+        <${tag} controls preload="metadata" src="${objectUrl}"></${tag}>
+        <a class="download-link" href="${objectUrl}" download="${escapeHtml(filename)}">Download media</a>
+      </div>
+    `
+    return
+  }
+
   if (contentType === 'application/pdf') {
     container.innerHTML = `
       <div class="content-wrapper">

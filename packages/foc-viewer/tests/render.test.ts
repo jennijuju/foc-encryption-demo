@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { detectContentType, renderProgressiveMedia, supportsProgressiveMedia } from '../src/render.js'
+import { detectContentType, renderContent, renderProgressiveMedia, supportsProgressiveMedia } from '../src/render.js'
 
 function bytes(...values: number[]): Uint8Array {
   return new Uint8Array(values)
@@ -66,6 +66,23 @@ describe('detectContentType', () => {
     // Bytes that are not valid UTF-8 and not a known format
     const data = bytes(0x00, 0x01, 0x02, 0xfe, 0xff, 0x80, 0x81, 0x82, 0x83)
     expect(await detectContentType(data)).toBe('application/octet-stream')
+  })
+})
+
+describe('renderContent', () => {
+  it('renders buffered video with playback controls and a download link', () => {
+    const createObjectURL = vi.fn(() => 'blob:video')
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL: vi.fn() })
+    const container = {
+      classList: { add: vi.fn() },
+      innerHTML: '',
+    } as unknown as HTMLElement
+
+    renderContent(container, bytes(0x00, 0x00, 0x00, 0x18), 'video/mp4')
+
+    expect(createObjectURL).toHaveBeenCalledOnce()
+    expect(container.innerHTML).toContain('<video controls preload="metadata" src="blob:video"></video>')
+    expect(container.innerHTML).toContain('Download media')
   })
 })
 

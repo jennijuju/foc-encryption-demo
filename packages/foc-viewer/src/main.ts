@@ -1,4 +1,4 @@
-import { MAX_INLINE_ENTRY_BYTES, readInlineEntry } from './decrypt.js'
+import { MAX_BUFFERED_MEDIA_BYTES, MAX_INLINE_ENTRY_BYTES, readInlineEntry } from './decrypt.js'
 import { parseFragment } from './fragment.js'
 import type { ProtectedArchive, ProtectedEntry } from './protected-archive.js'
 import { openProtectedArchive } from './protected-archive.js'
@@ -19,6 +19,15 @@ async function openAndRender(archive: ProtectedArchive, entry: ProtectedEntry): 
   if (entry.size > MAX_INLINE_ENTRY_BYTES) {
     const rendered = await renderProgressiveMedia(container, entry.contentType, () => archive.open(entry.path))
     if (rendered) return
+
+    if (
+      entry.size <= MAX_BUFFERED_MEDIA_BYTES &&
+      (entry.contentType.startsWith('audio/') || entry.contentType.startsWith('video/'))
+    ) {
+      const data = await readInlineEntry(await archive.open(entry.path), entry.size, MAX_BUFFERED_MEDIA_BYTES)
+      renderContent(container, data, entry.contentType)
+      return
+    }
 
     showSaveEntry(container, entry, () =>
       saveEntry(
