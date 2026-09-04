@@ -2,7 +2,7 @@ import { ZipReader, Uint8ArrayReader, Uint8ArrayWriter } from '@zip.js/zip.js'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { Writable } from 'node:stream'
@@ -141,6 +141,19 @@ describe.sequential('protectPath', () => {
       ['root.txt', 'root'],
     ])
   })
+  it('rejects content at or above 1000 MiB before generating an access key', async () => {
+    const input = join(tempDir, 'oversized.bin')
+    const output = join(tempDir, 'neutral.fee')
+    const capture = accessKeyCapture()
+    await writeFile(input, '')
+    await truncate(input, 1_048_576_000)
+
+    await expect(protectPath({ input, output, accessKeyOutput: capture.output })).rejects.toThrow(/below 1000 MiB/)
+
+    expect(capture.value()).toBe('')
+    await expect(stat(output)).rejects.toThrow()
+  })
+
 
   it('removes its private ZIP and transactional output after failure', async () => {
     const scratch = join(tempDir, 'scratch')

@@ -13,6 +13,7 @@ const TEMP_PREFIX = 'foc-protect-'
 const PBKDF2_ITERATIONS = 600_000
 const PBKDF2_HASH = 'SHA-256'
 const MAX_ARCHIVE_ENTRIES = 10_000
+const MAX_SOURCE_BYTES = 1_048_576_000
 const FILE_READ_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW
 
 export interface ProtectPathOptions {
@@ -231,6 +232,7 @@ export async function protectPath(options: ProtectPathOptions): Promise<ProtectR
   const entries = await collectArchiveEntries(options.input)
   const sourceBytes = entries.reduce((total, entry) => total + entry.size, 0)
   if (!Number.isSafeInteger(sourceBytes)) throw new Error('Input is too large to represent safely')
+  if (sourceBytes >= MAX_SOURCE_BYTES) throw new Error('Input must be below 1000 MiB')
   if (entries.length > MAX_ARCHIVE_ENTRIES) {
     throw new Error(`Input has more than ${MAX_ARCHIVE_ENTRIES} entries`)
   }
