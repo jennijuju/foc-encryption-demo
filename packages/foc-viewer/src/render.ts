@@ -146,6 +146,7 @@ export async function renderProgressiveMedia(
   container.replaceChildren(wrapper)
 
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+  let retainObjectUrl = false
   try {
     const { promise, resolve, reject } = Promise.withResolvers<void>()
     mediaSource.addEventListener('sourceopen', () => resolve(), { once: true })
@@ -160,6 +161,8 @@ export async function renderProgressiveMedia(
       if (value.length) await appendMediaChunk(sourceBuffer, value)
     }
     if (mediaSource.readyState === 'open') mediaSource.endOfStream()
+    activeObjectUrls.set(container, [objectUrl])
+    retainObjectUrl = true
     return true
   } catch {
     await reader?.cancel().catch(() => undefined)
@@ -168,6 +171,6 @@ export async function renderProgressiveMedia(
     container.replaceChildren()
     return false
   } finally {
-    URL.revokeObjectURL(objectUrl)
+    if (!retainObjectUrl) URL.revokeObjectURL(objectUrl)
   }
 }

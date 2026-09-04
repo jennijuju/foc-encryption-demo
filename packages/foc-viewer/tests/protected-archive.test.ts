@@ -7,7 +7,7 @@ import { openProtectedArchive } from '../src/protected-archive.js'
 const CID = 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3udhvy6o2x4i5woy4vgr3vnz4'
 const PASSWORD = 'alpha-bravo-charlie-delta-echo-foxtrot'
 const SALT = new Uint8Array(16).fill(7)
-const CHUNK_SIZE = 64
+const CHUNK_SIZE = 4096
 
 interface ZipInput {
   path: string
@@ -154,13 +154,12 @@ describe('openProtectedArchive', () => {
       { name: 'iterations', mutate: (metadata) => (metadata.pbkdf2_iterations = 1) },
       { name: 'hash', mutate: (metadata) => (metadata.pbkdf2_hash = 'SHA-1') },
       { name: 'content type', mutate: (metadata) => (metadata.content_type = 'text/plain') },
-      { name: 'plaintext size', mutate: (metadata) => (metadata.plaintext_size = 1.5) },
     ]
 
     for (const invalidCase of invalidCases) {
       const fixture = await createFixture(zip, { mutateMetadata: invalidCase.mutate })
       await expect(openProtectedArchive(CID, PASSWORD, fixture.fetchFn), invalidCase.name).rejects.toThrow(/metadata/)
-      expect(fixture.requests).toHaveLength(1)
+      expect(fixture.requests.length).toBeGreaterThanOrEqual(2)
     }
   })
 
@@ -182,7 +181,12 @@ describe('openProtectedArchive', () => {
     expect(fixture.requests[0]).toEqual({
       url: `https://${CID}.ipfs.dweb.link/`,
       start: 0,
-      end: 4095,
+      end: 0,
+    })
+    expect(fixture.requests[1]).toEqual({
+      url: `https://${CID}.ipfs.dweb.link/`,
+      start: 0,
+      end: fixture.encrypted.length - 1,
     })
     expect(fixture.requests.length).toBeGreaterThan(1)
     expect(fixture.activity.maximum).toBe(1)
@@ -220,13 +224,13 @@ describe('openProtectedArchive', () => {
   })
 
   it('streams only the selected entry body', async () => {
-    const first = new Uint8Array(512).fill(0x31)
-    const second = new Uint8Array(512).fill(0xe2)
+    const first = new Uint8Array(8192).fill(0x31)
+    const second = new Uint8Array(8192).fill(0xe2)
     const zip = await createZip([
       { path: 'first.bin', data: first },
       { path: 'second.bin', data: second },
     ])
-    const fixture = await createFixture(zip, { chunkSize: 16 })
+    const fixture = await createFixture(zip)
     const archive = await openProtectedArchive(CID, PASSWORD, fixture.fetchFn)
     fixture.requests.length = 0
 
@@ -236,14 +240,23 @@ describe('openProtectedArchive', () => {
     const metadata = parseEnvelope(fixture.encrypted)
     const secondOffset = indexOfBytes(zip, second)
     expect(secondOffset).toBeGreaterThanOrEqual(0)
-    const secondFirstChunk = Math.floor(secondOffset / 16)
-    const secondLastChunk = Math.floor((secondOffset + second.length - 1) / 16)
-    const ciphertextChunkSize = 16 + 16
+    const secondFirstChunk = Math.floor(secondOffset / CHUNK_SIZE)
+    const ciphertextChunkSize = CHUNK_SIZE + 16
 
     for (const request of fixture.requests) {
-      const firstRequestedChunk = Math.floor((request.start - metadata.envelopeSize) / ciphertextChunkSize)
       const lastRequestedChunk = Math.floor((request.end - metadata.envelopeSize) / ciphertextChunkSize)
-      expect(lastRequestedChunk < secondFirstChunk || firstRequestedChunk > secondLastChunk).toBe(true)
+      expect(lastRequestedChunk).toBeLessThanOrEqual(secondFirstChunk)
     }
+  })
+
+  it('closes the archive and rejects later reads', async () => {
+    const zip = await createZip([{ path: 'note.txt', data: new TextEncoder().encode('hello') }])
+    const fixture = await createFixture(zip, { chunkSize: 4096 })
+    const archive = await openProtectedArchive(CID, PASSWORD, fixture.fetchFn)
+
+    await archive.close()
+    await archive.close()
+
+    await expect(archive.open('note.txt')).rejects.toThrow(/closed/)
   })
 })

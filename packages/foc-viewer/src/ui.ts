@@ -3,7 +3,7 @@ import type { ProtectedEntry } from './protected-archive.js'
 const MARK_URL = new URL('../assets/engram-mark.png', import.meta.url).href
 const WASH_URL = new URL('../assets/engram-wash.png', import.meta.url).href
 
-const PASSWORD_ERROR = 'That password could not decrypt this share. Check it and try again.'
+const ACCESS_KEY_ERROR = 'That access key could not decrypt this share. Check it and try again.'
 const LOAD_ERROR = 'This share could not be loaded yet. It may still be propagating; try again shortly.'
 
 export function unlockErrorMessage(cause: unknown): string {
@@ -13,18 +13,18 @@ export function unlockErrorMessage(cause: unknown): string {
       cause.message.includes('AEAD authentication failed') ||
       cause.message === 'Wrong password')
   ) {
-    return PASSWORD_ERROR
+    return ACCESS_KEY_ERROR
   }
   return LOAD_ERROR
 }
 
-export function showPasswordPrompt(container: HTMLElement, onSubmit: (password: string) => Promise<void>): void {
+export function showAccessKeyPrompt(container: HTMLElement, onSubmit: (accessKey: string) => Promise<void>): void {
   container.innerHTML = `
     <div class="evidence-gate">
       <section class="evidence">
         <p class="eyebrow">Password-protected share</p>
         <h1>Share only what you choose.</h1>
-        <p>This content stays encrypted while it is stored and shared. Enter the password to open it here.</p>
+        <p>This content stays encrypted while it is stored and shared. Paste the access key to open it here.</p>
         <ul>
           <li>Decryption happens in your browser</li>
           <li>This page cannot change behind the link</li>
@@ -36,12 +36,12 @@ export function showPasswordPrompt(container: HTMLElement, onSubmit: (password: 
         <div class="form-heading">
           <p class="form-kicker">Open protected content</p>
           <h2>Unlock this share</h2>
-          <p>Use the password the sender gave you separately.</p>
+          <p>Use the access key the sender gave you separately.</p>
         </div>
-        <label for="pw-input">Password</label>
+        <label for="pw-input">Access key</label>
         <div class="password-input">
-          <input type="password" id="pw-input" autocomplete="off" placeholder="Enter password" />
-          <button class="password-toggle" id="password-toggle" type="button" aria-label="Show password" aria-pressed="false">
+          <input type="password" id="pw-input" autocomplete="off" placeholder="Paste access key" />
+          <button class="password-toggle" id="password-toggle" type="button" aria-label="Show access key" aria-pressed="false">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none">
               <path d="M2.7 12s3.4-5.2 9.3-5.2S21.3 12 21.3 12s-3.4 5.2-9.3 5.2S2.7 12 2.7 12Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" />
               <circle cx="12" cy="12" r="2.6" stroke="currentColor" stroke-width="1.7" />
@@ -49,7 +49,7 @@ export function showPasswordPrompt(container: HTMLElement, onSubmit: (password: 
           </button>
         </div>
         <button class="btn-primary" id="view-btn" type="submit">Unlock</button>
-        <p class="hint">Only someone with the password can unlock this share.</p>
+        <p class="hint">Only someone with the access key can unlock this share.</p>
         <p class="error" id="error" role="alert" hidden></p>
       </form>
     </div>
@@ -66,7 +66,7 @@ export function showPasswordPrompt(container: HTMLElement, onSubmit: (password: 
     const showPassword = passwordInput.type === 'password'
     const { selectionStart, selectionEnd } = passwordInput
     passwordInput.type = showPassword ? 'text' : 'password'
-    passwordToggle.setAttribute('aria-label', showPassword ? 'Hide password' : 'Show password')
+    passwordToggle.setAttribute('aria-label', showPassword ? 'Hide access key' : 'Show access key')
     passwordToggle.setAttribute('aria-pressed', String(showPassword))
     passwordInput.focus()
     if (selectionStart !== null && selectionEnd !== null) {
@@ -79,7 +79,7 @@ export function showPasswordPrompt(container: HTMLElement, onSubmit: (password: 
     if (button.disabled) return
 
     if (!passwordInput.value) {
-      error.textContent = 'Enter the password you received from the sender.'
+      error.textContent = 'Paste the access key you received from the sender.'
       error.hidden = false
       return
     }
@@ -92,7 +92,7 @@ export function showPasswordPrompt(container: HTMLElement, onSubmit: (password: 
     } catch (cause) {
       error.textContent = unlockErrorMessage(cause)
       error.hidden = false
-      if (error.textContent === PASSWORD_ERROR) passwordInput.select()
+      if (error.textContent === ACCESS_KEY_ERROR) passwordInput.select()
     } finally {
       button.disabled = false
       button.textContent = 'Unlock'
@@ -201,14 +201,16 @@ export function showProtectedArchive(
 export function showSaveEntry(
   container: HTMLElement,
   entry: ProtectedEntry,
-  onSave: () => Promise<'saved' | 'unsupported'>
+  onSave: () => Promise<'saved' | 'unsupported'>,
+  previewFailed = false
 ): void {
+  const actionLabel = previewFailed ? 'Download instead' : 'Download file'
   container.innerHTML = `
     <div class="content-wrapper">
       <p class="eyebrow">Password-protected share</p>
-      <h1>Ready to save.</h1>
+      <h1>${previewFailed ? 'Preview unavailable.' : 'Ready to download.'}</h1>
       <p id="save-entry-name"></p>
-      <button class="btn-primary" id="save-entry" type="button">Save file</button>
+      <button class="btn-primary" id="save-entry" type="button">${actionLabel}</button>
       <p class="hint" id="save-status" role="status"></p>
       <p class="error" id="save-error" role="alert" hidden></p>
     </div>
@@ -228,7 +230,7 @@ export function showSaveEntry(
     try {
       const result = await onSave()
       if (result === 'unsupported') {
-        error.textContent = 'This browser cannot save large files without holding them in memory.'
+        error.textContent = 'Open this protected link in Chromium to download a file this large.'
         error.hidden = false
       } else {
         status.textContent = 'Saved.'
@@ -238,7 +240,7 @@ export function showSaveEntry(
       error.hidden = false
     } finally {
       button.disabled = false
-      button.textContent = 'Save file'
+      button.textContent = actionLabel
     }
   })
 }

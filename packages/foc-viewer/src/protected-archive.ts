@@ -10,6 +10,7 @@ const PBKDF2_ITERATIONS = 600_000
 const PBKDF2_SALT_BYTES = 16
 const MAX_ARCHIVE_ENTRIES = 10_000
 const MAX_ZIP_READ_BYTES = 16 * 1024 * 1024
+const MAX_PROTECTED_BYTES = 1_048_576_000
 
 export interface ProtectedEntry {
   readonly path: string
@@ -57,15 +58,26 @@ class FeeZipReader extends Reader<void> {
 export interface ProtectedArchive {
   list(): readonly ProtectedEntry[]
   open(path: string): Promise<ReadableStream<Uint8Array>>
+  close(): Promise<void>
 }
 
 class RangeBackedProtectedArchive implements ProtectedArchive {
   readonly #entries: readonly ProtectedEntry[]
   readonly #files: ReadonlyMap<string, FileEntry>
+  readonly #zipReader: ZipReader<void>
+  readonly #cek: Uint8Array
+  #closed = false
 
-  constructor(entries: readonly ProtectedEntry[], files: ReadonlyMap<string, FileEntry>) {
+  constructor(
+    entries: readonly ProtectedEntry[],
+    files: ReadonlyMap<string, FileEntry>,
+    zipReader: ZipReader<void>,
+    cek: Uint8Array
+  ) {
     this.#entries = entries
     this.#files = files
+    this.#zipReader = zipReader
+    this.#cek = cek
   }
 
   list(): readonly ProtectedEntry[] {
@@ -73,6 +85,7 @@ class RangeBackedProtectedArchive implements ProtectedArchive {
   }
 
   async open(path: string): Promise<ReadableStream<Uint8Array>> {
+    if (this.#closed) throw new Error('Protected archive is closed')
     const entry = this.#files.get(path)
     if (!entry) throw new Error(`Protected archive file not found: ${path}`)
 
@@ -85,9 +98,21 @@ class RangeBackedProtectedArchive implements ProtectedArchive {
       .catch((error: unknown) => stream.writable.abort(error).catch(() => undefined))
     return stream.readable
   }
+
+  async close(): Promise<void> {
+    if (this.#closed) return
+    this.#closed = true
+    this.#cek.fill(0)
+    await this.#zipReader.close()
+  }
 }
 
-function createProtectedArchive(entries: Entry[], plaintextSize: number): ProtectedArchive {
+function createProtectedArchive(
+  entries: Entry[],
+  plaintextSize: number,
+  zipReader: ZipReader<void>,
+  cek: Uint8Array
+): ProtectedArchive {
   if (entries.length > MAX_ARCHIVE_ENTRIES) {
     throw new Error(`Protected archive has more than ${MAX_ARCHIVE_ENTRIES} entries`)
   }
@@ -134,7 +159,7 @@ function createProtectedArchive(entries: Entry[], plaintextSize: number): Protec
   }
 
   protectedEntries.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
-  return new RangeBackedProtectedArchive(Object.freeze(protectedEntries), files)
+  return new RangeBackedProtectedArchive(Object.freeze(protectedEntries), files, zipReader, cek)
 }
 
 function validateEntryPath(path: string, directory: boolean): string {
@@ -174,7 +199,12 @@ function validateMetadata(metadata: EnvelopeMetadata): {
   if (appMetadata?.content_type !== CONTENT_TYPE) {
     throw new Error('Protected archive has invalid content type metadata')
   }
-  if (typeof plaintextSize !== 'number' || !Number.isSafeInteger(plaintextSize) || plaintextSize < 0) {
+  if (
+    typeof plaintextSize !== 'number' ||
+    !Number.isSafeInteger(plaintextSize) ||
+    plaintextSize < 0 ||
+    plaintextSize >= MAX_PROTECTED_BYTES
+  ) {
     throw new Error('Protected archive has invalid plaintext size metadata')
   }
   const chunkSize = metadata.chunkSize
@@ -196,7 +226,7 @@ function validateMetadata(metadata: EnvelopeMetadata): {
 
 export async function openProtectedArchive(
   cid: string,
-  password: string,
+  accessKey: string,
   fetchFn?: typeof fetch
 ): Promise<ProtectedArchive> {
   if (!CID.test(cid)) throw new Error('Invalid encrypted Root CID')
@@ -204,7 +234,7 @@ export async function openProtectedArchive(
   const fetcher = createHttpBlobFetcher(`https://${cid}.ipfs.dweb.link/`, fetchFn)
   const metadata = await parseEnvelope(fetcher)
   const { plaintextSize, salt } = validateMetadata(metadata)
-  const { cek } = await deriveKey({ kind: 'password', password }, salt)
+  const { cek } = await deriveKey({ kind: 'password', password: accessKey }, salt)
   const zipReader = new ZipReader(new FeeZipReader(fetcher, metadata, cek, plaintextSize), {
     useWebWorkers: false,
   })
@@ -217,7 +247,7 @@ export async function openProtectedArchive(
       }
       entries.push(entry)
     }
-    return createProtectedArchive(entries, plaintextSize)
+    return createProtectedArchive(entries, plaintextSize, zipReader, cek)
   } catch (error) {
     cek.fill(0)
     await zipReader.close().catch(() => undefined)

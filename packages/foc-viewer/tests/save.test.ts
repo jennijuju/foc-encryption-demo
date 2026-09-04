@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MAX_INLINE_ENTRY_BYTES } from '../src/decrypt.js'
+import { MAX_DOCUMENT_PREVIEW_BYTES } from '../src/decrypt.js'
 import { saveEntry } from '../src/save.js'
 
 function byteStream(...chunks: Uint8Array[]): ReadableStream<Uint8Array> {
@@ -29,7 +29,7 @@ describe('saveEntry', () => {
     const open = vi.fn(async () => byteStream(new Uint8Array([1, 2]), new Uint8Array([3, 4])))
 
     await expect(
-      saveEntry({ size: MAX_INLINE_ENTRY_BYTES + 1, contentType: 'application/octet-stream', open }, 'archive.bin')
+      saveEntry({ size: MAX_DOCUMENT_PREVIEW_BYTES + 1, contentType: 'application/octet-stream', open }, 'archive.bin')
     ).resolves.toBe('saved')
 
     expect(picker).toHaveBeenCalledWith({ suggestedName: 'archive.bin' })
@@ -43,7 +43,7 @@ describe('saveEntry', () => {
     const open = vi.fn(async () => byteStream(new Uint8Array([1])))
 
     await expect(
-      saveEntry({ size: MAX_INLINE_ENTRY_BYTES + 1, contentType: 'application/octet-stream', open }, 'archive.bin')
+      saveEntry({ size: MAX_DOCUMENT_PREVIEW_BYTES + 1, contentType: 'application/octet-stream', open }, 'archive.bin')
     ).resolves.toBe('unsupported')
     expect(open).not.toHaveBeenCalled()
   })

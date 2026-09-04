@@ -1,4 +1,4 @@
-import { MAX_INLINE_ENTRY_BYTES, readInlineEntry } from './decrypt.js'
+import { MAX_DOCUMENT_PREVIEW_BYTES, readInlineEntry } from './decrypt.js'
 
 export interface SaveableEntry {
   readonly size: number
@@ -22,7 +22,7 @@ export async function saveEntry(entry: SaveableEntry, suggestedName: string): Pr
     return 'saved'
   }
 
-  if (entry.size > MAX_INLINE_ENTRY_BYTES) return 'unsupported'
+  if (entry.size > MAX_DOCUMENT_PREVIEW_BYTES) return 'unsupported'
 
   const data = await readInlineEntry(await entry.open(), entry.size)
   const objectUrl = URL.createObjectURL(new Blob([data as Uint8Array<ArrayBuffer>], { type: entry.contentType }))
