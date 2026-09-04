@@ -63,13 +63,21 @@ export function createHttpBlobFetcher(url: string, fetchFn: typeof fetch = fetch
     const responseStart = Number(match[1])
     const responseEnd = Number(match[2])
     const total = Number(match[3])
+    if (
+      !Number.isSafeInteger(responseStart) ||
+      !Number.isSafeInteger(responseEnd) ||
+      !Number.isSafeInteger(total) ||
+      responseStart !== offset ||
+      responseEnd !== end ||
+      responseEnd < responseStart ||
+      total <= responseEnd
+    ) {
+      throw new Error('Gateway returned an invalid Content-Range')
+    }
     if (totalSize !== undefined && total !== totalSize) {
       throw new Error('Gateway returned an inconsistent total size')
     }
     totalSize = total
-    if (responseStart !== offset || responseEnd < responseStart || responseEnd > end || total <= responseEnd) {
-      throw new Error('Gateway returned an invalid Content-Range')
-    }
     return readBoundedBody(response, responseEnd - responseStart + 1)
   }
 

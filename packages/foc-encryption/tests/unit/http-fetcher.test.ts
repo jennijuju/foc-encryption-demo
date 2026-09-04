@@ -84,6 +84,25 @@ describe('createHttpBlobFetcher', () => {
     await expect(fetcher.fetchRange(7, 3)).rejects.toThrow('larger than requested')
   })
 
+  it('rejects truncated and unsafe Content-Range values', async () => {
+    const truncated = vi.fn(async () => partialResponse(7, new Uint8Array([1, 2]), 10)) as unknown as typeof fetch
+    await expect(createHttpBlobFetcher('https://example.test/blob', truncated).fetchRange(7, 3)).rejects.toThrow(
+      'invalid Content-Range'
+    )
+
+    const unsafeTotal = vi.fn(
+      async () =>
+        new Response(new Uint8Array([1]), {
+          status: 206,
+          headers: { 'Content-Range': `bytes 0-0/${Number.MAX_SAFE_INTEGER + 1}` },
+        })
+    ) as unknown as typeof fetch
+    await expect(createHttpBlobFetcher('https://example.test/blob', unsafeTotal).getSize()).rejects.toThrow(
+      'invalid Content-Range'
+    )
+  })
+
+
   it('rejects invalid ranges without fetching', async () => {
     const fetchFn = vi.fn(async () => partialResponse()) as unknown as typeof fetch
     const fetcher = createHttpBlobFetcher('https://example.test/blob', fetchFn)

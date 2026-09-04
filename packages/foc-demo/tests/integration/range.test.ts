@@ -20,7 +20,7 @@ import { createSynapseClient } from '../../src/synapse.js'
 
 function makeBlobFetcher(blob: Uint8Array): BlobFetcher {
   return {
-    fetchEnvelope: vi.fn(async () => blob.slice(0, 4096)),
+    getSize: vi.fn(async () => blob.length),
     fetchRange: vi.fn(async (offset: number, length: number) => blob.slice(offset, offset + length)),
   }
 }
