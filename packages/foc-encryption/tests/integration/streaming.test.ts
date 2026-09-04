@@ -156,7 +156,6 @@ describe('encryptStream', () => {
     expect(requests.every((length) => length <= MAX_CHUNK_SIZE + 16)).toBe(true)
   })
 
-
   it('rejects early EOF before emitting a final encrypted chunk', async () => {
     await expectLengthError(streamFromChunks([new Uint8Array([1, 2, 3])]), 4, /ended early/)
   })

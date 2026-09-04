@@ -102,7 +102,6 @@ describe('createHttpBlobFetcher', () => {
     )
   })
 
-
   it('rejects invalid ranges without fetching', async () => {
     const fetchFn = vi.fn(async () => partialResponse()) as unknown as typeof fetch
     const fetcher = createHttpBlobFetcher('https://example.test/blob', fetchFn)

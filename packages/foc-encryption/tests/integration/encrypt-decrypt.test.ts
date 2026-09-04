@@ -141,7 +141,6 @@ describe('unsupported scheme', () => {
     const cek = crypto.getRandomValues(new Uint8Array(32))
     const plaintext = new TextEncoder().encode('test')
 
-    // biome-ignore lint/suspicious/noExplicitAny: testing invalid algorithm ID
     await expect(encrypt(plaintext, cek, { algorithm: 9999 as never })).rejects.toThrow(UnsupportedSchemeError)
   })
 

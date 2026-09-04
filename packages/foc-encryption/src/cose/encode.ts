@@ -31,7 +31,6 @@ export function encodeCoseEncrypt0(algorithmId: number, iv: Uint8Array, options?
   return encode(new Tagged(COSE_TAG_ENCRYPT0, [protectedBytes, unprotectedMap, null]))
 }
 
-
 export function getProtectedHeaderBytes(algorithmId: number, options?: EncodeOptions): Uint8Array {
   const protectedMap = new Map<number, unknown>([
     [COSE_HEADER_ALG, algorithmId],

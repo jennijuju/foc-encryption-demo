@@ -111,7 +111,14 @@ describe('FEE v1 wire profile', () => {
       ['invalid IV length', blob(16, [encode(validProtected()), new Map([[5, new Uint8Array(11)]]), null])],
       [
         'unknown unprotected parameter',
-        blob(16, [encode(validProtected()), new Map([[5, new Uint8Array(12)], [99, true]]), null]),
+        blob(16, [
+          encode(validProtected()),
+          new Map([
+            [5, new Uint8Array(12)],
+            [99, true],
+          ]),
+          null,
+        ]),
       ],
       [
         'unknown protected parameter',
@@ -119,11 +126,7 @@ describe('FEE v1 wire profile', () => {
       ],
       [
         'non-string metadata key',
-        blob(16, [
-          encode(new Map([...validProtected(), [-65792, new Map([[1, 'value']])]])),
-          validUnprotected(),
-          null,
-        ]),
+        blob(16, [encode(new Map([...validProtected(), [-65792, new Map([[1, 'value']])]])), validUnprotected(), null]),
       ],
       [
         'nested metadata value',

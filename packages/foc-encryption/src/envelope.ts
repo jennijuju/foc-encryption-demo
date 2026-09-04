@@ -82,11 +82,7 @@ function encodeEnvelope(
   return encodeCoseEncrypt0(algorithm, iv, { appMetadata, chunkSize })
 }
 
-export async function encrypt(
-  plaintext: Uint8Array,
-  cek: CEKBytes,
-  options: EncryptOptions
-): Promise<Uint8Array> {
+export async function encrypt(plaintext: Uint8Array, cek: CEKBytes, options: EncryptOptions): Promise<Uint8Array> {
   validateCek(cek)
   const chunkSize =
     options.algorithm === CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM
@@ -274,7 +270,10 @@ function parseEnvelopeBytes(blob: Uint8Array, totalSize = blob.length): Envelope
   if (envelope.appMetadata) {
     appMetadata = Object.fromEntries(envelope.appMetadata) as AppMetadata
   }
-  const plaintextSize = chunkCount === undefined ? ciphertextLength - AES_GCM_TAG_LENGTH : ciphertextLength - chunkCount * AES_GCM_TAG_LENGTH
+  const plaintextSize =
+    chunkCount === undefined
+      ? ciphertextLength - AES_GCM_TAG_LENGTH
+      : ciphertextLength - chunkCount * AES_GCM_TAG_LENGTH
   if (
     appMetadata?.plaintext_size !== undefined &&
     (!Number.isSafeInteger(appMetadata.plaintext_size) || appMetadata.plaintext_size !== plaintextSize)

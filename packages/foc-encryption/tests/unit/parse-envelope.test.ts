@@ -53,7 +53,6 @@ describe('parseEnvelope', () => {
     expect(new Uint8Array(metadata.appMetadata?.cid as Uint8Array)).toEqual(cid)
   })
 
-
   it('malformed blob throws MalformedEnvelopeError', () => {
     const garbage = new Uint8Array([0xff, 0xfe, 0xfd])
     expect(() => parseEnvelope(garbage)).toThrow(MalformedEnvelopeError)

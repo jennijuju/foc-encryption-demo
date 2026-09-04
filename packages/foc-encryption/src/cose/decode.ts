@@ -136,7 +136,6 @@ export function decodeCoseEnvelope(blob: Uint8Array): DecodedEnvelope {
     }
   }
 
-
   const envelopeSize = blob.length - remainder.length
   if (envelopeSize > MAX_ENVELOPE_SIZE) {
     throw new MalformedEnvelopeError('FEE envelope is too large')
@@ -153,4 +152,3 @@ export function decodeCoseEnvelope(blob: Uint8Array): DecodedEnvelope {
     envelopeSize,
   }
 }
-

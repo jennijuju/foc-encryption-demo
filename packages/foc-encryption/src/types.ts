@@ -42,7 +42,6 @@ export interface EnvelopeMetadata {
   envelopeSize: number
 }
 
-
 export interface BlobFetcher {
   getSize(): Promise<number>
   fetchRange(offset: number, length: number): Promise<Uint8Array>

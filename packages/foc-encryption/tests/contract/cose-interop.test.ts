@@ -28,5 +28,4 @@ describe('COSE interoperability (SC-004)', () => {
 
     expect(remainder.length).toBeGreaterThan(0) // ciphertext follows
   })
-
 })

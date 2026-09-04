@@ -25,7 +25,6 @@ describe('body AAD context matches the envelope structure (RFC 9052 Section 5.3)
   const plaintext = new TextEncoder().encode(message)
   const opts = { algorithm: CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM, chunkSize: 4096 } as const
 
-
   it('tag 16 (COSE_Encrypt0, no recipients) binds the body to the "Encrypt0" context', async () => {
     const blob = await encrypt(plaintext, cek, opts)
 
