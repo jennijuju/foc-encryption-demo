@@ -1,6 +1,6 @@
 import type { ProtectedEntry } from './protected-archive.js'
 
-const PASSWORD_ERROR = 'That password could not decrypt this share. Check all six words and try again.'
+const PASSWORD_ERROR = 'That password could not decrypt this share. Check it and try again.'
 const LOAD_ERROR = 'This share could not be loaded yet. It may still be propagating; try again shortly.'
 
 export function unlockErrorMessage(cause: unknown): string {
@@ -19,6 +19,20 @@ export function showPasswordPrompt(container: HTMLElement, onSubmit: (password: 
   container.innerHTML = `
     <div class="evidence-gate">
       <section class="evidence">
+        <div class="engram-brand">
+          <svg viewBox="20 10 460 180" aria-hidden="true">
+            <defs>
+              <linearGradient id="engram-mark" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#7185F5" />
+                <stop offset=".55" stop-color="#A9B1F4" />
+                <stop offset="1" stop-color="#D7D9F6" />
+              </linearGradient>
+            </defs>
+            <path d="M444,88 C374,26 280,40 185,120 C150,150 92,168 66,140 C40,112 66,70 110,80 C142,88 162,102 185,120 C240,170 330,174 410,158" fill="none" stroke="currentColor" stroke-width="14" stroke-linecap="round" />
+            <circle cx="410" cy="158" r="16" fill="url(#engram-mark)" />
+          </svg>
+          <span>engram</span>
+        </div>
         <p class="eyebrow">Password-protected share</p>
         <h1>Protected without an account.</h1>
         <p>This page fetches public ciphertext and decrypts it only after you enter the password.</p>

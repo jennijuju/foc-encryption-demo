@@ -1,6 +1,6 @@
-import type { ProtectedArchive, ProtectedEntry } from './protected-archive.js'
 import { MAX_INLINE_ENTRY_BYTES, readInlineEntry } from './decrypt.js'
 import { parseFragment } from './fragment.js'
+import type { ProtectedArchive, ProtectedEntry } from './protected-archive.js'
 import { openProtectedArchive } from './protected-archive.js'
 import { detectContentType, renderContent, renderProgressiveMedia } from './render.js'
 import { saveEntry } from './save.js'
@@ -39,7 +39,12 @@ async function openAndRender(archive: ProtectedArchive, entry: ProtectedEntry): 
 
 async function unlockArchive(cid: string, password: string): Promise<void> {
   const archive = await openProtectedArchive(cid, password)
-  showProtectedArchive(container, archive.list(), (entry) => openAndRender(archive, entry))
+  const entries = archive.list()
+  if (entries.length === 1 && !entries[0].directory) {
+    await openAndRender(archive, entries[0])
+    return
+  }
+  showProtectedArchive(container, entries, (entry) => openAndRender(archive, entry))
 }
 
 function init(): void {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { unlockErrorMessage } from '../src/ui.js'
 
-const PASSWORD_ERROR = 'That password could not decrypt this share. Check all six words and try again.'
+const PASSWORD_ERROR = 'That password could not decrypt this share. Check it and try again.'
 const LOAD_ERROR = 'This share could not be loaded yet. It may still be propagating; try again shortly.'
 
 describe('unlockErrorMessage', () => {
