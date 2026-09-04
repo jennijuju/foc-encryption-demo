@@ -15,8 +15,7 @@ const artifactPath = join(packageRoot, 'dist', 'foc-protect.mjs')
 const ACCESS_KEY = /^engram_[A-Za-z0-9_-]{43}$/
 
 function execNode(args: string[]): Promise<{ stdout: string; stderr: string }> {
-  const { promise, resolve: resolveExecution, reject } =
-    Promise.withResolvers<{ stdout: string; stderr: string }>()
+  const { promise, resolve: resolveExecution, reject } = Promise.withResolvers<{ stdout: string; stderr: string }>()
   execFile(process.execPath, args, { cwd: packageRoot, encoding: 'utf8' }, (error, stdout, stderr) => {
     if (error) reject(Object.assign(error, { stdout, stderr }))
     else resolveExecution({ stdout, stderr })
@@ -153,7 +152,6 @@ describe.sequential('protectPath', () => {
     expect(capture.value()).toBe('')
     await expect(stat(output)).rejects.toThrow()
   })
-
 
   it('removes its private ZIP and transactional output after failure', async () => {
     const scratch = join(tempDir, 'scratch')

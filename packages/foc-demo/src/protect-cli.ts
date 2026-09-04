@@ -14,7 +14,6 @@ function parseInheritedFd(value: string | undefined, flag: string): number | und
   return fd
 }
 
-
 export async function main(args: string[] = process.argv.slice(2)): Promise<void> {
   const { values } = parseArgs({
     args,
