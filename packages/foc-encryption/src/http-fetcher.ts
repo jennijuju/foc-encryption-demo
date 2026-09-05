@@ -50,7 +50,9 @@ export function createHttpBlobFetcher(url: string, fetchFn: typeof fetch = fetch
     if (!Number.isSafeInteger(requestedEnd)) {
       throw new Error('Invalid byte range')
     }
-    if (totalSize !== undefined && offset >= totalSize) return new Uint8Array()
+    if (totalSize !== undefined && offset >= totalSize) {
+      throw new Error('Invalid byte range: offset is past the end of the object')
+    }
     const end = totalSize === undefined ? requestedEnd : Math.min(requestedEnd, totalSize - 1)
 
     const response = await fetchFn(url, { headers: { Range: `bytes=${offset}-${end}` }, redirect: 'error' })

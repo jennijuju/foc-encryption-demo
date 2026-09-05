@@ -53,6 +53,16 @@ describe('createHttpBlobFetcher', () => {
     })
   })
 
+  it('rejects reads past the end of the object without fetching', async () => {
+    const fetchFn = vi.fn(async () => partialResponse(0, bytes.slice(0, 1))) as unknown as typeof fetch
+    const fetcher = createHttpBlobFetcher('https://example.test/blob', fetchFn)
+
+    await expect(fetcher.getSize()).resolves.toBe(10)
+    await expect(fetcher.fetchRange(10, 1)).rejects.toThrow('Invalid byte range: offset is past the end of the object')
+
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects gateways that ignore range requests', async () => {
     const fetchFn = vi.fn(async () => new Response(bytes, { status: 200 })) as unknown as typeof fetch
     const fetcher = createHttpBlobFetcher('https://example.test/blob', fetchFn)

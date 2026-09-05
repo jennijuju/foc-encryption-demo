@@ -78,13 +78,8 @@ function deriveChunkCount(envelope: DecodedEnvelope, ciphertextLength: number): 
   return chunkCount
 }
 
-function encodeEnvelope(
-  algorithm: CoseAlgorithmId,
-  iv: Uint8Array,
-  appMetadata: AppMetadata | undefined,
-  chunkSize: number | undefined
-): Uint8Array {
-  return encodeCoseEncrypt0(algorithm, iv, { appMetadata, chunkSize })
+function encodeEnvelope(algorithm: CoseAlgorithmId, iv: Uint8Array, protectedHeaders: Uint8Array): Uint8Array {
+  return encodeCoseEncrypt0(algorithm, iv, { protectedBytes: protectedHeaders })
 }
 
 async function importProfileKey(cek: Uint8Array, algorithm: number, objectNonce?: Uint8Array): Promise<CryptoKey> {
@@ -120,7 +115,7 @@ export async function encrypt(plaintext: Uint8Array, cek: CEKBytes, options: Enc
 
   const result = await scheme.encrypt(key, plaintext, protectedHeaders, 'Encrypt0', options.appMetadata)
 
-  const envelope = encodeEnvelope(options.algorithm, result.iv, options.appMetadata, result.chunkSize)
+  const envelope = encodeEnvelope(options.algorithm, result.iv, protectedHeaders)
 
   return assembleBlob(envelope, result.ciphertext)
 }
@@ -150,7 +145,7 @@ export async function encryptStream(
 
   let envelope: Uint8Array
   try {
-    envelope = encodeEnvelope(options.algorithm, result.iv, options.appMetadata, result.chunkSize)
+    envelope = encodeEnvelope(options.algorithm, result.iv, protectedHeaders)
   } catch (error) {
     await result.ciphertext.cancel(error)
     throw error

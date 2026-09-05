@@ -20,6 +20,8 @@ const MAX_ENVELOPE_SIZE = 1024 * 1024
 interface EncodeOptions {
   appMetadata?: AppMetadata
   chunkSize?: number
+  /** Pre-encoded protected header bytes, used verbatim so authenticated and stored bytes are the same buffer. */
+  protectedBytes?: Uint8Array
 }
 
 function buildUnprotectedMap(iv: Uint8Array): Map<number, unknown> {
@@ -27,7 +29,7 @@ function buildUnprotectedMap(iv: Uint8Array): Map<number, unknown> {
 }
 
 export function encodeCoseEncrypt0(algorithmId: number, iv: Uint8Array, options?: EncodeOptions): Uint8Array {
-  const protectedBytes = getProtectedHeaderBytes(algorithmId, options)
+  const protectedBytes = options?.protectedBytes ?? getProtectedHeaderBytes(algorithmId, options)
   const unprotectedMap = buildUnprotectedMap(iv)
   const envelope = encode(new Tagged(COSE_TAG_ENCRYPT0, [protectedBytes, unprotectedMap, null]))
   if (envelope.length > MAX_ENVELOPE_SIZE) {
