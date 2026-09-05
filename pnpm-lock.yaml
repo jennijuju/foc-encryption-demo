@@ -63,6 +63,9 @@ importers:
 
   packages/foc-viewer:
     dependencies:
+      '@zip.js/zip.js':
+        specifier: 2.8.11
+        version: 2.8.11
       foc-encryption:
         specifier: workspace:*
         version: link:../foc-encryption
