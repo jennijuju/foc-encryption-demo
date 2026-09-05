@@ -1,174 +1,114 @@
-# Data Model: Encryption Envelope Library
+# FEE v1 data model
 
-**Feature**: 001-encryption-envelope-lib
-**Date**: 2026-03-26
+This file describes the implemented local product profile. The normative behavior is in [`spec.md`](spec.md).
 
-## Entities
+## Encrypted object
 
-### EncryptedBlob
-
-The canonical output format: COSE envelope concatenated with ciphertext.
-
-```
-[COSE envelope (CBOR, self-delimiting)] [ciphertext bytes]
+```text
+FeeObject
+├── envelope: COSE_Encrypt0 (CBOR tag 16)
+└── ciphertext: detached authenticated bytes
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| envelope | `Uint8Array` | CBOR-encoded COSE_Encrypt or COSE_Encrypt0 structure |
-| ciphertext | `Uint8Array` | Encrypted data (simple AEAD output or concatenated chunk ciphertexts) |
+The CBOR envelope is self-delimiting, so its encoded length is the ciphertext offset.
 
-**Validation**: Envelope must be valid CBOR. Blob must be at least envelope-size bytes.
-**Parsing**: `cborg.decodeFirst()` on the blob yields the envelope; remainder is ciphertext.
+## Protected header map
 
-### CoseEnvelope
-
-A COSE_Encrypt or COSE_Encrypt0 structure in detached-payload mode.
-
-**COSE_Encrypt0** (CBOR Tag 16 — single recipient):
-```
-[protected: bstr, unprotected: map, ciphertext: nil]
+```text
+ProtectedHeaders
+├── 1: algorithm
+├── 16: "application/vnd.filecoin-encryption+cose"
+├── -65794: profile version 1
+├── -1: chunk size, chunked algorithm only
+└── -65792: application metadata, optional
 ```
 
-**COSE_Encrypt** (CBOR Tag 96 — multiple recipients):
-```
-[protected: bstr, unprotected: map, ciphertext: nil, recipients: [+CoseRecipient]]
-```
+Every value in this map is included in the AES-GCM AAD through the RFC 9052 `Enc_structure` with context `Encrypt0`.
 
-#### Protected Headers (authenticated, CBOR-encoded map inside bstr)
+## Unprotected header map
 
-| Label | Name | Type | Required | Description |
-|-------|------|------|----------|-------------|
-| 1 | `alg` | int | YES | COSE algorithm identifier. `3` = AES-256-GCM, `-65537` = Chunked-AES-256-GCM-STREAM |
-| 16 | `typ` | tstr | YES | Envelope type identifier: `"application/vnd.foc-envelope+cose"` |
-
-#### Unprotected Headers
-
-| Label | Name | Type | Required | Description |
-|-------|------|------|----------|-------------|
-| 5 | `iv` | bstr | YES | Initialization vector. 12 bytes for AES-256-GCM simple scheme. 7-byte base nonce for chunked scheme. |
-| -65790 | `chunk_size` | uint | Chunked only | Chunk size in bytes (default 262144 = 256 KiB) |
-| -65791 | `chunk_count` | uint | Chunked only | Total number of chunks |
-| -65792 | `app_metadata` | map | NO | Application metadata (CBOR map with string keys, see below) |
-
-**Note**: `iv` is in unprotected headers because it does not need authentication — it is bound into the AEAD computation via the nonce. The `alg` and `typ` are in protected headers because they determine processing semantics and must be authenticated.
-
-#### Application Metadata Map (`-65792`)
-
-A CBOR map with string keys containing application-level metadata. This is not a COSE header map — keys are strings for readability.
-
-| Key | Type | Required | Description |
-|-----|------|----------|-------------|
-| `"cid"` | bstr | NO | Original plaintext content identifier (CID) per FR-019 |
-
-### CoseRecipient
-
-A COSE_recipient structure describing how one party obtains the CEK.
-
-```
-[protected: bstr, unprotected: map, ciphertext: bstr]
+```text
+UnprotectedHeaders
+└── 5: nonce or object nonce, 12 bytes
 ```
 
-| Header Label | Name | Type | Description |
-|--------------|------|------|-------------|
-| 1 | `alg` | int | Key management algorithm (e.g., -3 = A256KW, -6 = direct) |
-| 4 | `kid` | bstr | Key identifier for the recipient |
-| — | — | — | Additional algorithm-specific parameters |
+No other unprotected parameter is accepted. Changing the nonce causes authentication failure.
 
-The `ciphertext` field contains the wrapped CEK (or is empty for direct key agreement).
+## Algorithms
 
-### ContentEncryptionKey (CEK)
+### AES-256-GCM
 
-| Field | Type | Constraints |
-|-------|------|-------------|
-| key_bytes | `Uint8Array` | Exactly 32 bytes for AES-256 |
-
-**Validation**: Must be exactly 32 bytes. Must not be all zeros.
-**Lifecycle**: Imported via `crypto.subtle.importKey()` with `extractable: false`. Zeroed from source buffer after import.
-
-### EncryptionScheme
-
-| Field | Type | Description |
-|-------|------|-------------|
-| algorithm_id | `number` | COSE algorithm identifier |
-| name | `string` | Human-readable name |
-| is_seekable | `boolean` | Whether scheme supports range decryption |
-
-**Registered schemes**:
-
-| Algorithm ID | Name | Seekable | IV Size | Notes |
-|-------------|------|----------|---------|-------|
-| 3 | AES-256-GCM | No | 12 bytes | IANA standard, baseline interop |
-| -65793 | Chunked-AES-256-GCM-STREAM | Yes | 7 bytes (base nonce) | Private-use, STREAM construction |
-
-### ChunkMetadata (seekable scheme only)
-
-| Field | Type | Description |
-|-------|------|-------------|
-| chunk_size | `number` | Bytes per chunk (default 262144) |
-| chunk_count | `number` | Total number of chunks |
-| base_nonce | `Uint8Array` | 7-byte random nonce prefix |
-
-**Nonce derivation per chunk**:
-```
-nonce_i[0..6]  = base_nonce[0..6]
-nonce_i[7..10] = chunk_index (4 bytes, big-endian)
-nonce_i[11]    = last_flag (0x00 or 0x01)
+```text
+SimpleBody
+├── algorithm: 3
+├── nonce: 12 bytes
+├── plaintext: complete byte sequence
+└── ciphertext: encrypted bytes + 16-byte tag
 ```
 
-**Chunk ciphertext layout**:
-```
-[chunk_0_ciphertext || tag_0] [chunk_1_ciphertext || tag_1] ... [chunk_n_ciphertext || tag_n]
-```
-Each chunk ciphertext is `chunk_size + 16` bytes (16-byte auth tag), except the last chunk which may be smaller.
+### Chunked AES-256-GCM-STREAM
 
-## State Transitions
-
-### Encryption Flow
-
-```
-Plaintext + CEK + SchemeConfig
-    → validate inputs
-    → generate random IV/nonce
-    → encrypt (simple or chunked)
-    → build COSE envelope (protected + unprotected headers)
-    → assemble blob (envelope || ciphertext)
-    → zero key material
-    → return EncryptedBlob
+```text
+ChunkedBody
+├── algorithm: -65793
+├── object nonce: 12 random bytes; HKDF-SHA-256 salt for an object-specific AES key
+├── chunk size: 4 KiB through 16 MiB; default 256 KiB
+└── encrypted chunks: each plaintext chunk + 16-byte tag
 ```
 
-### Decryption Flow
+Chunk count is derived from total ciphertext length. It is not stored in the envelope.
 
-```
-EncryptedBlob + CEK
-    → parse envelope (decodeFirst)
-    → extract algorithm, IV, scheme params
-    → validate scheme is supported
-    → decrypt (simple or chunked, optionally with byte range)
-    → verify authentication tags
-    → zero key material
-    → return plaintext
+```text
+chunk nonce = zero[8] || chunk_index_u32_be[4]
+chunk external AAD = final ? 0x01 : 0x00
 ```
 
-### Range Decryption Flow (seekable only)
+## Public TypeScript values
 
-```
-EncryptedBlob + CEK + ByteRange(offset, length)
-    → parse envelope
-    → verify scheme is seekable (error if not)
-    → compute affected chunk range from byte offset/length
-    → decrypt only affected chunks
-    → slice to exact requested byte range
-    → return partial plaintext
+```typescript
+interface EnvelopeMetadata {
+  tag: 16
+  profileVersion: 1
+  algorithm: 3 | -65793
+  seekable: boolean
+  iv: Uint8Array
+  protectedHeaders: Uint8Array
+  chunkSize?: number
+  chunkCount?: number
+  plaintextSize: number
+  appMetadata?: AppMetadata
+  envelopeSize: number
+}
+
+interface BlobFetcher {
+  getSize(): Promise<number>
+  fetchRange(offset: number, length: number): Promise<Uint8Array>
+}
 ```
 
-## Relationships
+`chunkCount` appears in parsed metadata only after derivation from total size. It is never serialized.
 
+## Engram archive profile
+
+```text
+ProtectedArchive
+├── FEE v1 envelope
+│   └── authenticated PBKDF2 and archive metadata
+└── encrypted ZIP payload
+    ├── original filenames and paths
+    └── STORE entries, decrypted by authenticated ranges
 ```
-EncryptedBlob
-  └── CoseEnvelope (1:1)
-        ├── EncryptionScheme (1:1, via alg header)
-        ├── ChunkMetadata (0:1, present only for seekable scheme)
-        └── CoseRecipient (0:N, via recipients array in COSE_Encrypt)
-              └── wrapped CEK or key reference
+
+The ZIP uses compression method 0 so selected entries remain range-addressable. Original names never appear in the outer FEE metadata.
+
+The generated access key is a separate bearer secret:
+
+```text
+AccessKey = "engram_" || base64url(32 random bytes)
 ```
+
+PBKDF2 combines that text with the authenticated random salt to derive the 32-byte CEK. The encrypted object receives its Root CID after encryption; the access key does not encode the CID or file.
+
+## Removed from v1
+
+`COSE_Encrypt` recipient arrays, `Recipient`, `RecipientInfo`, serialized chunk count, user-selected passphrases, X25519, and KMS are not part of the v1 production profile. They require a later version with end-to-end key wrapping, unwrapping, identity, recovery, and browser behavior.

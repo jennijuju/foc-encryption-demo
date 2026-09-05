@@ -1,5 +1,7 @@
 # Implementation Plan: Encryption Envelope Library
 
+> Historical prototype plan. The v1 production profile and current public interface are now defined by `spec.md`, `data-model.md`, `quickstart.md`, `contracts/public-api.ts`, and `../../docs/foc-encryption-library.md`. Recipient and unprotected-metadata decisions below are superseded.
+
 **Branch**: `001-encryption-envelope-lib` | **Date**: 2026-03-26 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `/specs/001-encryption-envelope-lib/spec.md`
 
