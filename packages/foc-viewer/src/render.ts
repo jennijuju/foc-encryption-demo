@@ -1,27 +1,24 @@
 import { filetypemime } from 'magic-bytes.js'
+import { createLockedHtmlFrame } from './sandbox.js'
+
+const activeObjectUrls = new WeakMap<HTMLElement, string[]>()
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-/**
- * Detect MIME type of decrypted data using magic bytes.
- * Falls back to HTML/text/binary heuristics for formats magic-bytes.js doesn't cover.
- */
+export function revokeRenderedObjectUrls(container: HTMLElement): void {
+  for (const objectUrl of activeObjectUrls.get(container) ?? []) URL.revokeObjectURL(objectUrl)
+  activeObjectUrls.delete(container)
+}
+
 export async function detectContentType(data: Uint8Array): Promise<string> {
-  // magic-bytes.js detects binary formats (PNG, JPEG, GIF, WebP, PDF, etc.)
   const mimes = filetypemime(Array.from(data.slice(0, 100)))
-  if (mimes.length > 0) {
-    return mimes[0]
-  }
+  if (mimes.length > 0) return mimes[0]
 
-  // Check for HTML markers (not binary, so magic-bytes won't detect)
   const prefix = new TextDecoder().decode(data.slice(0, 15)).trimStart().toLowerCase()
-  if (prefix.startsWith('<!doctype') || prefix.startsWith('<html')) {
-    return 'text/html'
-  }
+  if (prefix.startsWith('<!doctype') || prefix.startsWith('<html')) return 'text/html'
 
-  // Check if valid UTF-8 text
   try {
     new TextDecoder('utf-8', { fatal: true }).decode(data)
     return 'text/plain'
@@ -30,22 +27,25 @@ export async function detectContentType(data: Uint8Array): Promise<string> {
   }
 }
 
-/**
- * Render decrypted content into the container based on its MIME type.
- * - HTML: replace full page DOM
- * - Images: centered <img> with download link
- * - PDF: <embed> viewer with download link
- * - Text: <pre> block with download link
- * - Binary/other: download only
- */
+export function isBinaryPreviewType(contentType: string): boolean {
+  return (
+    contentType.startsWith('image/') ||
+    contentType.startsWith('audio/') ||
+    contentType.startsWith('video/') ||
+    contentType === 'application/pdf'
+  )
+}
+
 export function renderContent(container: HTMLElement, data: Uint8Array, contentType: string): void {
+  revokeRenderedObjectUrls(container)
   if (contentType === 'text/html') {
-    document.body.innerHTML = new TextDecoder().decode(data)
+    container.replaceChildren(createLockedHtmlFrame(new TextDecoder().decode(data)))
     return
   }
 
   const blob = new Blob([data as Uint8Array<ArrayBuffer>], { type: contentType })
   const objectUrl = URL.createObjectURL(blob)
+  activeObjectUrls.set(container, [objectUrl])
   const filename = 'decrypted-content'
 
   if (contentType.startsWith('image/')) {
@@ -54,6 +54,18 @@ export function renderContent(container: HTMLElement, data: Uint8Array, contentT
       <div class="content-wrapper">
         <img src="${objectUrl}" alt="Decrypted image" style="max-width:100%;max-height:90vh;display:block;margin:0 auto;" />
         <a class="download-link" href="${objectUrl}" download="${escapeHtml(filename)}" style="display:block;text-align:center;">Download image</a>
+      </div>
+    `
+    return
+  }
+
+  if (contentType.startsWith('audio/') || contentType.startsWith('video/')) {
+    const tag = contentType.startsWith('audio/') ? 'audio' : 'video'
+    container.classList.add('wide')
+    container.innerHTML = `
+      <div class="content-wrapper">
+        <${tag} controls preload="metadata" src="${objectUrl}"></${tag}>
+        <a class="download-link" href="${objectUrl}" download="${escapeHtml(filename)}">Download media</a>
       </div>
     `
     return
@@ -80,7 +92,6 @@ export function renderContent(container: HTMLElement, data: Uint8Array, contentT
     return
   }
 
-  // Binary / unknown: download only
   container.innerHTML = `
     <div class="content-wrapper">
       <p>Content decrypted successfully (${escapeHtml(contentType)}).</p>
@@ -88,3 +99,4 @@ export function renderContent(container: HTMLElement, data: Uint8Array, contentT
     </div>
   `
 }
+
