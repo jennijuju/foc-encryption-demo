@@ -10,6 +10,8 @@
 
 /** Encrypt plaintext into a COSE envelope + ciphertext blob. */
 export { decrypt, decryptRange, encrypt, encryptStream, parseEnvelope } from './envelope.js'
+/** HTTP Range adapter for remote encrypted blobs. */
+export { createHttpBlobFetcher } from './http-fetcher.js'
 
 /** COSE algorithm identifiers and header parameter labels. */
 export { CoseAlgorithm, CoseHeaderParam } from './cose/headers.js'
