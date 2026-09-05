@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Locked frame smoke fixture</title>
+  </head>
+  <body>
+    <h1>Locked frame smoke fixture</h1>
+    <script type="module">
+      import { createLockedHtmlFrame } from '/src/sandbox.ts'
+
+      const decryptedHtml = `
+        <!doctype html>
+        <html>
+          <head>
+            <meta http-equiv="refresh" content="0;url=https://example.invalid/meta-navigation">
+          </head>
+          <body>
+            <p id="inline-script">static content rendered</p>
+            <a id="link" href="https://example.invalid/link-navigation">leave</a>
+            <img id="image" src="https://example.invalid/image">
+            <svg><a><set attributeName="href" to="https://example.invalid/smil-navigation"></set><text>animated link</text></a></svg>
+            <form id="form" action="https://example.invalid/form"><button>send</button></form>
+            <script>
+              document.querySelector('#inline-script').textContent = 'inline script ran'
+              window.location.href = 'https://example.invalid/self-navigation?data=' +
+                encodeURIComponent(document.documentElement.innerHTML)
+            <\/script>
+          </body>
+        </html>
+      `
+      const frame = createLockedHtmlFrame(decryptedHtml)
+      frame.id = 'locked-frame'
+      document.body.append(frame)
+    </script>
+  </body>
+</html>
