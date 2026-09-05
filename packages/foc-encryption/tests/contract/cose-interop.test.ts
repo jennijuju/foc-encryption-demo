@@ -1,6 +1,6 @@
 import * as cborg from 'cborg'
 import { describe, expect, it } from 'vitest'
-import { COSE_HEADER_ALG, COSE_HEADER_TYP, CoseAlgorithm, FOC_ENVELOPE_TYPE } from '../../src/cose/headers.js'
+import { COSE_HEADER_ALG, COSE_HEADER_TYP, CoseAlgorithm, FEE_ENVELOPE_TYPE } from '../../src/cose/headers.js'
 import { coseDecodeOptions } from '../../src/cose/tags.js'
 import { encrypt } from '../../src/envelope.js'
 
@@ -24,7 +24,7 @@ describe('COSE interoperability (SC-004)', () => {
     // Protected header round-trip
     const protectedMap = cborg.decode(arr[0] as Uint8Array, { useMaps: true }) as Map<number, unknown>
     expect(protectedMap.get(COSE_HEADER_ALG)).toBe(3)
-    expect(protectedMap.get(COSE_HEADER_TYP)).toBe(FOC_ENVELOPE_TYPE)
+    expect(protectedMap.get(COSE_HEADER_TYP)).toBe(FEE_ENVELOPE_TYPE)
 
     expect(remainder.length).toBeGreaterThan(0) // ciphertext follows
   })

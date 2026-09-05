@@ -21,21 +21,21 @@ describe('parseEnvelope', () => {
     expect(metadata.chunkCount).toBeUndefined()
   })
 
-  it('parses chunked envelope metadata (chunkSize, chunkCount, seekable=true)', async () => {
+  it('parses chunked envelope metadata with derived chunk count', async () => {
     const cek = crypto.getRandomValues(new Uint8Array(32))
-    const plaintext = new Uint8Array(200).fill(0x42)
+    const plaintext = new Uint8Array(10_000).fill(0x42)
 
     const blob = await encrypt(plaintext, cek, {
       algorithm: CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM,
-      chunkSize: 64,
+      chunkSize: 4096,
     })
     const metadata = parseEnvelope(blob)
 
     expect(metadata.algorithm).toBe(-65793)
     expect(metadata.seekable).toBe(true)
-    expect(metadata.iv.length).toBe(7)
-    expect(metadata.chunkSize).toBe(64)
-    expect(metadata.chunkCount).toBe(4)
+    expect(metadata.iv.length).toBe(12)
+    expect(metadata.chunkSize).toBe(4096)
+    expect(metadata.chunkCount).toBe(3)
   })
 
   it('parses app_metadata with CID', async () => {

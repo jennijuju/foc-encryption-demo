@@ -16,6 +16,10 @@ export interface ChunkedEncryptOptions {
   appMetadata?: AppMetadata
 }
 
+export interface StreamEncryptOptions extends ChunkedEncryptOptions {
+  plaintextLength: number
+}
+
 export type EncryptOptions = SimpleEncryptOptions | ChunkedEncryptOptions
 
 export interface AppMetadata {
@@ -27,18 +31,20 @@ export type CoseEnvelopeTag = 16
 
 export interface EnvelopeMetadata {
   tag: CoseEnvelopeTag
+  profileVersion: 1
   algorithm: CoseAlgorithmId
   seekable: boolean
   iv: Uint8Array
   protectedHeaders: Uint8Array
   chunkSize?: number
   chunkCount?: number
+  plaintextSize: number
   appMetadata?: AppMetadata
   envelopeSize: number
 }
 
 export interface BlobFetcher {
-  fetchEnvelope(): Promise<Uint8Array>
+  getSize(): Promise<number>
   fetchRange(offset: number, length: number): Promise<Uint8Array>
 }
 

@@ -1,9 +1,13 @@
+import { InvalidKeyError } from './errors.js'
+
 export type KeySource = { kind: 'hex'; hex: string } | { kind: 'password'; password: string }
 
 export interface DerivedKey {
   cek: Uint8Array
   salt?: Uint8Array
 }
+
+const MIN_SALT_LENGTH = 16
 
 function hexToBytes(hex: string): Uint8Array {
   if (hex.length !== 64) {
@@ -26,6 +30,9 @@ export async function deriveKey(source: KeySource, existingSalt?: Uint8Array): P
     return { cek: hexToBytes(source.hex) }
   }
 
+  if (existingSalt !== undefined && existingSalt.length < MIN_SALT_LENGTH) {
+    throw new InvalidKeyError(`PBKDF2 salt must be at least ${MIN_SALT_LENGTH} bytes, got ${existingSalt.length}`)
+  }
   const saltSource = existingSalt ?? crypto.getRandomValues(new Uint8Array(16))
   const salt = new Uint8Array(saltSource)
   const keyMaterial = await crypto.subtle.importKey(

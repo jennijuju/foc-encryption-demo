@@ -18,12 +18,12 @@ describe('CoseAlgorithm', () => {
 })
 
 describe('CoseHeaderParam', () => {
-  it('has CHUNK_SIZE = -65790', () => {
-    expect(CoseHeaderParam.CHUNK_SIZE).toBe(-65790)
+  it('has the algorithm-specific chunk size label', () => {
+    expect(CoseHeaderParam.CHUNK_SIZE).toBe(-1)
   })
 
-  it('has CHUNK_COUNT = -65791', () => {
-    expect(CoseHeaderParam.CHUNK_COUNT).toBe(-65791)
+  it('has the private-use profile version label', () => {
+    expect(CoseHeaderParam.PROFILE_VERSION).toBe(-65794)
   })
 
   it('has APP_METADATA = -65792', () => {

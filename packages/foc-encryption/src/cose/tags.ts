@@ -6,4 +6,5 @@ export const COSE_TAG_ENCRYPT0 = 16
 export const coseDecodeOptions: DecodeOptions = {
   tags: Tagged.preserve(COSE_TAG_ENCRYPT0),
   useMaps: true,
+  rejectDuplicateMapKeys: true,
 }

@@ -1,18 +1,19 @@
 /**
- * foc-encryption — COSE-based encryption envelopes for content-addressed data.
+ * foc-encryption implements the versioned COSE_Encrypt0 FEE profile.
  *
- * Provides AES-256-GCM encryption with COSE_Encrypt0 envelopes, optional
- * chunked STREAM construction for seekable decryption, and keyless envelope
- * inspection.
+ * Provides complete and streaming AES-256-GCM encryption, chunked STREAM
+ * construction for authenticated range decryption, strict envelope inspection,
+ * and an HTTP Range adapter for Node and modern browsers.
  *
  * @packageDocumentation
  */
 
 /** Encrypt plaintext into a COSE envelope + ciphertext blob. */
-export { decrypt, decryptRange, encrypt, parseEnvelope } from './envelope.js'
+export { decrypt, decryptRange, encrypt, encryptStream, parseEnvelope } from './envelope.js'
 
 /** COSE algorithm identifiers and header parameter labels. */
 export { CoseAlgorithm, CoseHeaderParam } from './cose/headers.js'
+export { MAX_CHUNK_SIZE } from './schemes/chunked-aes-256-gcm.js'
 
 export type {
   /** Application-level metadata stored in the COSE envelope. */
@@ -35,6 +36,8 @@ export type {
   EnvelopeMetadata,
   /** Options for simple (non-seekable) encryption. */
   SimpleEncryptOptions,
+  /** Options for bounded-memory chunked encryption from a byte stream. */
+  StreamEncryptOptions,
 } from './types.js'
 
 /** Derive a content encryption key from a password or raw hex material. */

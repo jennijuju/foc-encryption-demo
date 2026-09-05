@@ -37,3 +37,21 @@ export async function aesGcmDecrypt(
 export async function importAesGcmKey(rawKey: Uint8Array): Promise<CryptoKey> {
   return c.subtle.importKey('raw', rawKey as BufferSource, 'AES-GCM', false, ['encrypt', 'decrypt'])
 }
+
+const CHUNK_OBJECT_KEY_INFO = new TextEncoder().encode('FEE v1 chunked AES-256-GCM object key')
+
+export async function deriveAesGcmObjectKey(rawKey: Uint8Array, objectNonce: Uint8Array): Promise<CryptoKey> {
+  const hkdfKey = await c.subtle.importKey('raw', rawKey as BufferSource, 'HKDF', false, ['deriveKey'])
+  return c.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: objectNonce as BufferSource,
+      info: CHUNK_OBJECT_KEY_INFO as BufferSource,
+    },
+    hkdfKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  )
+}

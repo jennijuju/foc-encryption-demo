@@ -1,13 +1,7 @@
 import type { AppMetadata } from '../types.js'
 
-/**
- * The COSE Enc_structure context string (RFC 9052 Section 5.3): "Encrypt" for a
- * COSE_Encrypt (tag 96, has recipients) and "Encrypt0" for a COSE_Encrypt0
- * (tag 16, no recipients). The body AEAD must authenticate the context that
- * matches the envelope structure carrying it, so the caller (envelope.ts)
- * selects it from the presence of recipients rather than the scheme assuming one.
- */
-export type EncStructureContext = 'Encrypt' | 'Encrypt0'
+/** The FEE v1 body AEAD uses the COSE_Encrypt0 RFC 9052 Section 5.3 context. */
+export type EncStructureContext = 'Encrypt0'
 
 export interface DecryptMetadata {
   chunkSize?: number

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { InvalidKeyError } from '../../src/errors.js'
 import { deriveKey, hexToBytes } from '../../src/kdf.js'
 
 describe('hexToBytes', () => {
@@ -62,6 +63,13 @@ describe('deriveKey', () => {
     const result1 = await deriveKey(source, salt1)
     const result2 = await deriveKey(source, salt2)
     expect(result1.cek).not.toEqual(result2.cek)
+  })
+
+  it('rejects caller salts shorter than 16 bytes', async () => {
+    const source = { kind: 'password' as const, password: 'test-password' }
+    await expect(deriveKey(source, new Uint8Array(0))).rejects.toThrow(InvalidKeyError)
+    await expect(deriveKey(source, new Uint8Array(15))).rejects.toThrow('PBKDF2 salt must be at least 16 bytes')
+    await expect(deriveKey(source, new Uint8Array(16))).resolves.toBeDefined()
   })
 
   it('generates a random salt when none is provided for password source', async () => {
