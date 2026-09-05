@@ -76,6 +76,8 @@ Original filenames, folder paths, user identifiers, and private metadata MUST re
 - Ciphertext length: plaintext length plus 16.
 - `chunk_size` MUST be absent.
 
+Algorithm `3` is a library capability, not part of the Engram protected-share candidate surface. A library caller MUST use a fresh CEK per object or bound reuse far below the NIST SP 800-38D random-nonce limit of 2^32 invocations per key. The Engram profile always derives a fresh CEK per object from a fresh 16-byte PBKDF2 salt.
+
 ## Algorithm -65793: chunked AES-256-GCM-STREAM
 
 - CEK: exactly 32 bytes and not all zero.
@@ -109,6 +111,8 @@ interface BlobFetcher {
 ```
 
 Envelope parsing starts with 4 KiB and doubles the probe only when needed, up to 1 MiB. In-memory parsing also slices a bounded prefix before CBOR decoding. Duplicate CBOR map keys are rejected. An HTTP adapter MUST reject redirects and require status 206, exact safe-integer `Content-Range` start/end/total values, stable total size, and a body whose length exactly matches the response range. Shortened, oversized, inconsistent, ignored, malformed, and unsafe ranges are rejected.
+
+Delivery trust is split. Ciphertext integrity never depends on the transport: every chunk is AEAD-authenticated under the recipient-derived key, so a hostile gateway can only deny service. Viewer-code integrity depends on CID-addressed delivery through an integrity-verifying in-browser gateway (the inbrowser.link service worker); that gateway origin's bootstrap page is a trusted component of the threat model and is stated as such rather than assumed. The v1 viewer fetches ciphertext from `https://<encrypted-root-cid>.ipfs.dweb.link/` while itself being served from `https://<viewerCid>.ipfs.inbrowser.link/`. The redirect rule above is absolute: the adapter rejects every redirect, with no approved-origin exception.
 
 ## Generated access-key profile
 
