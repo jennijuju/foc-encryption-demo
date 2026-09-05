@@ -1,9 +1,9 @@
 /**
  * foc-encryption — COSE-based encryption envelopes for content-addressed data.
  *
- * Provides AES-256-GCM encryption with COSE_Encrypt0/COSE_Encrypt envelopes,
- * optional chunked STREAM construction for seekable decryption, multi-recipient
- * key management descriptors, and keyless envelope inspection.
+ * Provides AES-256-GCM encryption with COSE_Encrypt0 envelopes, optional
+ * chunked STREAM construction for seekable decryption, and keyless envelope
+ * inspection.
  *
  * @packageDocumentation
  */
@@ -33,10 +33,6 @@ export type {
   EncryptOptions,
   /** Parsed envelope metadata — available without a decryption key. */
   EnvelopeMetadata,
-  /** Recipient descriptor for multi-recipient encryption (COSE_Encrypt). */
-  Recipient,
-  /** Read-only view of a parsed recipient descriptor. */
-  RecipientInfo,
   /** Options for simple (non-seekable) encryption. */
   SimpleEncryptOptions,
 } from './types.js'

@@ -1,13 +1,12 @@
 import { assembleBlob, parseBlob } from './blob.js'
 import { decodeCoseEnvelope } from './cose/decode.js'
-import { encodeCoseEncrypt, encodeCoseEncrypt0, getProtectedHeaderBytes } from './cose/encode.js'
+import { encodeCoseEncrypt0, getProtectedHeaderBytes } from './cose/encode.js'
 import { CoseAlgorithm } from './cose/headers.js'
-import { COSE_TAG_ENCRYPT, COSE_TAG_ENCRYPT0 } from './cose/tags.js'
 import { MalformedEnvelopeError, SchemeNotSeekableError, UnsupportedSchemeError } from './errors.js'
 import { importAndZeroCek, validateCek } from './key-utils.js'
 import { Aes256Gcm } from './schemes/aes-256-gcm.js'
 import { ChunkedAes256GcmStream, DEFAULT_CHUNK_SIZE } from './schemes/chunked-aes-256-gcm.js'
-import type { DecryptMetadata, EncStructureContext, EncryptionScheme } from './schemes/scheme.js'
+import type { DecryptMetadata, EncryptionScheme } from './schemes/scheme.js'
 import type {
   AppMetadata,
   BlobFetcher,
@@ -15,10 +14,8 @@ import type {
   CEKBytes,
   ChunkedEncryptOptions,
   CoseAlgorithmId,
-  CoseEnvelopeTag,
   EncryptOptions,
   EnvelopeMetadata,
-  Recipient,
 } from './types.js'
 
 function getScheme(algorithmId: number, chunkSize?: number): EncryptionScheme {
@@ -32,21 +29,7 @@ function getScheme(algorithmId: number, chunkSize?: number): EncryptionScheme {
   }
 }
 
-/**
- * The COSE Enc_structure context follows the envelope tag (RFC 9052
- * Section 5.3): "Encrypt" for COSE_Encrypt (tag 96) and "Encrypt0" for
- * COSE_Encrypt0 (tag 16).
- */
-function encStructureContext(tag: CoseEnvelopeTag): EncStructureContext {
-  return tag === COSE_TAG_ENCRYPT ? 'Encrypt' : 'Encrypt0'
-}
-
-export async function encrypt(
-  plaintext: Uint8Array,
-  cek: CEKBytes,
-  options: EncryptOptions,
-  recipients?: Recipient[]
-): Promise<Uint8Array> {
+export async function encrypt(plaintext: Uint8Array, cek: CEKBytes, options: EncryptOptions): Promise<Uint8Array> {
   validateCek(cek)
   const chunkSize =
     options.algorithm === CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM
@@ -58,28 +41,14 @@ export async function encrypt(
   const cekCopy = new Uint8Array(cek)
   const key = await importAndZeroCek(cekCopy)
 
-  const envelopeRecipients = recipients?.length ? recipients : undefined
-  const tag = envelopeRecipients ? COSE_TAG_ENCRYPT : COSE_TAG_ENCRYPT0
-  const context = encStructureContext(tag)
-  const result = await scheme.encrypt(key, plaintext, protectedHeaders, context, options.appMetadata)
+  const result = await scheme.encrypt(key, plaintext, protectedHeaders, 'Encrypt0', options.appMetadata)
 
-  let envelope: Uint8Array
   const encodeOpts = {
     appMetadata: options.appMetadata,
     chunkSize: result.chunkSize,
     chunkCount: result.chunkCount,
   }
-
-  if (envelopeRecipients) {
-    for (const r of envelopeRecipients) {
-      if (!r.wrappedKey || r.wrappedKey.length === 0) {
-        throw new MalformedEnvelopeError('Recipient must have a non-empty wrappedKey')
-      }
-    }
-    envelope = encodeCoseEncrypt(options.algorithm, result.iv, envelopeRecipients, encodeOpts)
-  } else {
-    envelope = encodeCoseEncrypt0(options.algorithm, result.iv, encodeOpts)
-  }
+  const envelope = encodeCoseEncrypt0(options.algorithm, result.iv, encodeOpts)
 
   return assembleBlob(envelope, result.ciphertext)
 }
@@ -92,10 +61,8 @@ export async function decrypt(blob: Uint8Array, cek: CEKBytes): Promise<Uint8Arr
 
   const cekCopy = new Uint8Array(cek)
   const key = await importAndZeroCek(cekCopy)
-
-  const context = encStructureContext(envelope.tag)
   const metadata: DecryptMetadata = { chunkSize: envelope.chunkSize, chunkCount: envelope.chunkCount }
-  return scheme.decrypt(key, parsed.ciphertext, envelope.iv, envelope.protectedHeaders, context, metadata)
+  return scheme.decrypt(key, parsed.ciphertext, envelope.iv, envelope.protectedHeaders, 'Encrypt0', metadata)
 }
 
 export async function decryptRange(
@@ -134,13 +101,12 @@ export async function decryptRange(
   const fetchLength = ctEnd !== undefined ? ctEnd - ctStart : (lastChunk - firstChunk + 1) * ciphertextChunkSize // overfetch last chunk is OK
   const fetched = await fetcher.fetchRange(ctStart, fetchLength)
 
-  const context = encStructureContext(metadata.tag)
   return chunkedScheme.decryptRange(
     key,
     fetched,
     metadata.iv,
     metadata.protectedHeaders,
-    context,
+    'Encrypt0',
     range.offset - firstChunk * effectiveChunkSize,
     range.length,
     effectiveChunkSize,
@@ -174,7 +140,6 @@ function parseEnvelopeBytes(blob: Uint8Array): EnvelopeMetadata {
     chunkSize: envelope.chunkSize,
     chunkCount: envelope.chunkCount,
     appMetadata,
-    recipients: envelope.recipients,
     envelopeSize: envelope.envelopeSize,
   }
 }

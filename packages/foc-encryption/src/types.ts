@@ -23,7 +23,7 @@ export interface AppMetadata {
   [key: string]: Uint8Array | string | number | boolean | undefined
 }
 
-export type CoseEnvelopeTag = 16 | 96
+export type CoseEnvelopeTag = 16
 
 export interface EnvelopeMetadata {
   tag: CoseEnvelopeTag
@@ -34,21 +34,7 @@ export interface EnvelopeMetadata {
   chunkSize?: number
   chunkCount?: number
   appMetadata?: AppMetadata
-  recipients: RecipientInfo[]
   envelopeSize: number
-}
-
-export interface RecipientInfo {
-  algorithm: number
-  keyId?: Uint8Array
-  wrappedKey?: Uint8Array
-}
-
-export interface Recipient {
-  algorithm: number
-  keyId?: Uint8Array
-  wrappedKey: Uint8Array
-  unprotectedHeaders?: Map<number, unknown>
 }
 
 export interface BlobFetcher {

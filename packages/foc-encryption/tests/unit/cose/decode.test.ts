@@ -13,7 +13,6 @@ describe('decodeCoseEnvelope', () => {
     expect(result.tag).toBe(16)
     expect(result.algorithm).toBe(3)
     expect(new Uint8Array(result.iv)).toEqual(iv)
-    expect(result.recipients).toHaveLength(0)
   })
 
   it('extracts protected headers (alg, typ)', () => {
