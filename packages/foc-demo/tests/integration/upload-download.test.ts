@@ -6,7 +6,6 @@ import { encrypt, parseEnvelope, CoseAlgorithm } from 'foc-encryption'
 
 vi.mock('../../src/synapse.js', () => ({
   createSynapseClient: vi.fn(),
-  createBlobFetcher: vi.fn(),
 }))
 
 import { uploadFile } from '../../src/commands/upload.js'
@@ -104,9 +103,7 @@ describe('upload command', () => {
       }
     }
 
-    expect(createSynapseClient).toHaveBeenCalledWith(
-      expect.objectContaining({ privateKey: '0x' + 'cd'.repeat(32) })
-    )
+    expect(createSynapseClient).toHaveBeenCalledWith(expect.objectContaining({ privateKey: '0x' + 'cd'.repeat(32) }))
   })
 
   it('throws actionable error when no private key is provided', async () => {
@@ -171,9 +168,7 @@ describe('download command', () => {
 
     const fakeUrl = 'https://retrieval.example.com/piece/testcid'
 
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(blob, { status: 200 })
-    )
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(blob, { status: 200 }))
 
     const outputPath = join(tempDir, 'downloaded.txt')
     await downloadFile({
@@ -192,8 +187,14 @@ describe('download command', () => {
   it('URL locator with password: uses salt from envelope for decryption', async () => {
     // Encrypt with password-derived key (embed salt in metadata)
     const salt = crypto.getRandomValues(new Uint8Array(16))
-    const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode('secret'), 'PBKDF2', false, ['deriveBits'])
-    const keyBits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 600_000, hash: 'SHA-256' }, keyMaterial, 256)
+    const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode('secret'), 'PBKDF2', false, [
+      'deriveBits',
+    ])
+    const keyBits = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt, iterations: 600_000, hash: 'SHA-256' },
+      keyMaterial,
+      256
+    )
     const keyBytes = new Uint8Array(keyBits)
 
     const plaintext = new TextEncoder().encode('password round-trip test')
@@ -202,9 +203,7 @@ describe('download command', () => {
       appMetadata: { pbkdf2_salt: salt, pbkdf2_iterations: 600_000, pbkdf2_hash: 'SHA-256' },
     })
 
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(blob, { status: 200 })
-    )
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(blob, { status: 200 }))
 
     const outputPath = join(tempDir, 'pw-downloaded.txt')
     await downloadFile({
@@ -238,8 +237,6 @@ describe('download command', () => {
 
     const downloaded = await import('node:fs/promises').then((m) => m.readFile(outputPath))
     expect(new TextDecoder().decode(downloaded)).toBe('piececid round-trip content')
-    expect(createSynapseClient).toHaveBeenCalledWith(
-      expect.objectContaining({ privateKey: '0x' + 'ab'.repeat(32) })
-    )
+    expect(createSynapseClient).toHaveBeenCalledWith(expect.objectContaining({ privateKey: '0x' + 'ab'.repeat(32) }))
   })
 })

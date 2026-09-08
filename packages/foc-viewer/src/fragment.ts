@@ -1,25 +1,18 @@
+const CID_PATTERN = /^b[a-z2-7]{20,120}$/
+
 export interface FragmentParams {
-  url: string
-  password?: string
+  cid: string
 }
 
-/** Parse URL fragment into structured params. Returns null if no `url` param found. */
+/** Parse a CID-only URL fragment. */
 export function parseFragment(hash: string): FragmentParams | null {
   const raw = hash.startsWith('#') ? hash.slice(1) : hash
   if (!raw) return null
-  const params = new URLSearchParams(raw)
-  const url = params.get('url')
-  if (!url) return null
-  const pw = params.get('pw')
-  return { url, password: pw ?? undefined }
+
+  const entries = [...new URLSearchParams(raw).entries()]
+  if (entries.length !== 1 || entries[0][0] !== 'cid') return null
+
+  const cid = entries[0][1]
+  return CID_PATTERN.test(cid) ? { cid } : null
 }
 
-/** Build a URL fragment string from params. */
-export function buildFragment(params: FragmentParams): string {
-  const p = new URLSearchParams()
-  p.set('url', params.url)
-  if (params.password !== undefined) {
-    p.set('pw', params.password)
-  }
-  return `#${p.toString()}`
-}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { decodeCoseEnvelope } from '../../../src/cose/decode.js'
 import { encodeCoseEncrypt0 } from '../../../src/cose/encode.js'
-import { COSE_HEADER_IV, CoseAlgorithm, FOC_ENVELOPE_TYPE } from '../../../src/cose/headers.js'
+import { COSE_HEADER_IV, CoseAlgorithm, FEE_ENVELOPE_TYPE } from '../../../src/cose/headers.js'
 
 describe('decodeCoseEnvelope', () => {
   it('parses COSE_Encrypt0 (tag 16) envelope', () => {
@@ -13,7 +13,6 @@ describe('decodeCoseEnvelope', () => {
     expect(result.tag).toBe(16)
     expect(result.algorithm).toBe(3)
     expect(new Uint8Array(result.iv)).toEqual(iv)
-    expect(result.recipients).toHaveLength(0)
   })
 
   it('extracts protected headers (alg, typ)', () => {

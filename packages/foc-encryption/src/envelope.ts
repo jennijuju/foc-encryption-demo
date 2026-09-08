@@ -1,13 +1,22 @@
-import { assembleBlob, parseBlob } from './blob.js'
+import { assembleBlob } from './blob.js'
 import { decodeCoseEnvelope } from './cose/decode.js'
-import { encodeCoseEncrypt, encodeCoseEncrypt0, getProtectedHeaderBytes } from './cose/encode.js'
+import type { DecodedEnvelope } from './cose/decode.js'
+import { encodeCoseEncrypt0, getProtectedHeaderBytes } from './cose/encode.js'
 import { CoseAlgorithm } from './cose/headers.js'
-import { COSE_TAG_ENCRYPT, COSE_TAG_ENCRYPT0 } from './cose/tags.js'
-import { MalformedEnvelopeError, SchemeNotSeekableError, UnsupportedSchemeError } from './errors.js'
+import { deriveAesGcmObjectKey, getRandomValues } from './crypto.js'
+import { FocEncryptionError, MalformedEnvelopeError, SchemeNotSeekableError, UnsupportedSchemeError } from './errors.js'
 import { importAndZeroCek, validateCek } from './key-utils.js'
-import { Aes256Gcm } from './schemes/aes-256-gcm.js'
-import { ChunkedAes256GcmStream, DEFAULT_CHUNK_SIZE } from './schemes/chunked-aes-256-gcm.js'
-import type { DecryptMetadata, EncStructureContext, EncryptionScheme } from './schemes/scheme.js'
+import { AES_GCM_IV_LENGTH, Aes256Gcm } from './schemes/aes-256-gcm.js'
+import {
+  AES_GCM_TAG_LENGTH,
+  BASE_NONCE_LENGTH,
+  ChunkedAes256GcmStream,
+  DEFAULT_CHUNK_SIZE,
+  MAX_CHUNK_INDEX,
+  MAX_CHUNK_SIZE,
+  MIN_CHUNK_SIZE,
+} from './schemes/chunked-aes-256-gcm.js'
+import type { DecryptMetadata, EncryptionScheme } from './schemes/scheme.js'
 import type {
   AppMetadata,
   BlobFetcher,
@@ -15,88 +24,180 @@ import type {
   CEKBytes,
   ChunkedEncryptOptions,
   CoseAlgorithmId,
-  CoseEnvelopeTag,
   EncryptOptions,
   EnvelopeMetadata,
-  Recipient,
+  StreamEncryptOptions,
 } from './types.js'
 
-function getScheme(algorithmId: number, chunkSize?: number): EncryptionScheme {
+function getScheme(algorithmId: number, chunkSize?: number, objectNonce?: Uint8Array): EncryptionScheme {
   switch (algorithmId) {
     case CoseAlgorithm.AES_256_GCM:
       return new Aes256Gcm()
     case CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM:
-      return new ChunkedAes256GcmStream(chunkSize ? { chunkSize } : undefined)
+      if (chunkSize !== undefined && chunkSize < MIN_CHUNK_SIZE) {
+        throw new FocEncryptionError(`Chunk size must be at least ${MIN_CHUNK_SIZE}`)
+      }
+      return new ChunkedAes256GcmStream({ chunkSize, objectNonce })
     default:
       throw new UnsupportedSchemeError(algorithmId)
   }
 }
 
-/**
- * The COSE Enc_structure context follows the envelope tag (RFC 9052
- * Section 5.3): "Encrypt" for COSE_Encrypt (tag 96) and "Encrypt0" for
- * COSE_Encrypt0 (tag 16).
- */
-function encStructureContext(tag: CoseEnvelopeTag): EncStructureContext {
-  return tag === COSE_TAG_ENCRYPT ? 'Encrypt' : 'Encrypt0'
+function deriveChunkCount(envelope: DecodedEnvelope, ciphertextLength: number): number | undefined {
+  if (envelope.algorithm === CoseAlgorithm.AES_256_GCM) {
+    if (envelope.iv.length !== AES_GCM_IV_LENGTH || ciphertextLength < AES_GCM_TAG_LENGTH) {
+      throw new MalformedEnvelopeError('Invalid AES-256-GCM envelope geometry')
+    }
+    if (envelope.chunkSize !== undefined) {
+      throw new MalformedEnvelopeError('Simple AES-256-GCM envelope must not contain a chunk size')
+    }
+    return undefined
+  }
+  if (envelope.algorithm !== CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM) {
+    throw new UnsupportedSchemeError(envelope.algorithm)
+  }
+  const chunkSize = envelope.chunkSize
+  if (
+    chunkSize === undefined ||
+    !Number.isSafeInteger(chunkSize) ||
+    chunkSize < MIN_CHUNK_SIZE ||
+    chunkSize > MAX_CHUNK_SIZE ||
+    envelope.iv.length !== BASE_NONCE_LENGTH
+  ) {
+    throw new MalformedEnvelopeError('Invalid chunked envelope geometry')
+  }
+  const ciphertextChunkSize = chunkSize + AES_GCM_TAG_LENGTH
+  const chunkCount = Math.ceil(ciphertextLength / ciphertextChunkSize)
+  if (chunkCount - 1 > MAX_CHUNK_INDEX) {
+    throw new MalformedEnvelopeError('Chunk count exceeds the 4-byte counter maximum')
+  }
+  const finalChunkLength = ciphertextLength - (chunkCount - 1) * ciphertextChunkSize
+  if (chunkCount < 1 || finalChunkLength < AES_GCM_TAG_LENGTH || finalChunkLength > ciphertextChunkSize) {
+    throw new MalformedEnvelopeError('Invalid chunked ciphertext length')
+  }
+  return chunkCount
 }
 
-export async function encrypt(
-  plaintext: Uint8Array,
-  cek: CEKBytes,
-  options: EncryptOptions,
-  recipients?: Recipient[]
-): Promise<Uint8Array> {
+function encodeEnvelope(algorithm: CoseAlgorithmId, iv: Uint8Array, protectedHeaders: Uint8Array): Uint8Array {
+  return encodeCoseEncrypt0(algorithm, iv, { protectedBytes: protectedHeaders })
+}
+
+async function importProfileKey(cek: Uint8Array, algorithm: number, objectNonce?: Uint8Array): Promise<CryptoKey> {
+  if (algorithm !== CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM) return importAndZeroCek(cek)
+  if (!objectNonce || objectNonce.length !== BASE_NONCE_LENGTH) {
+    cek.fill(0)
+    throw new FocEncryptionError('Chunked encryption requires a 12-byte object nonce')
+  }
+  try {
+    validateCek(cek)
+    return await deriveAesGcmObjectKey(cek, objectNonce)
+  } finally {
+    cek.fill(0)
+  }
+}
+
+export async function encrypt(plaintext: Uint8Array, cek: CEKBytes, options: EncryptOptions): Promise<Uint8Array> {
   validateCek(cek)
   const chunkSize =
     options.algorithm === CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM
-      ? (options as ChunkedEncryptOptions).chunkSize
+      ? ((options as ChunkedEncryptOptions).chunkSize ?? DEFAULT_CHUNK_SIZE)
       : undefined
-  const scheme = getScheme(options.algorithm, chunkSize)
-  const protectedHeaders = getProtectedHeaderBytes(options.algorithm)
+  const objectNonce =
+    options.algorithm === CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM ? getRandomValues(BASE_NONCE_LENGTH) : undefined
+  const scheme = getScheme(options.algorithm, chunkSize, objectNonce)
+  const protectedHeaders = getProtectedHeaderBytes(options.algorithm, {
+    appMetadata: options.appMetadata,
+    chunkSize,
+  })
 
   const cekCopy = new Uint8Array(cek)
-  const key = await importAndZeroCek(cekCopy)
+  const key = await importProfileKey(cekCopy, options.algorithm, objectNonce)
 
-  const envelopeRecipients = recipients?.length ? recipients : undefined
-  const tag = envelopeRecipients ? COSE_TAG_ENCRYPT : COSE_TAG_ENCRYPT0
-  const context = encStructureContext(tag)
-  const result = await scheme.encrypt(key, plaintext, protectedHeaders, context, options.appMetadata)
+  const result = await scheme.encrypt(key, plaintext, protectedHeaders, 'Encrypt0', options.appMetadata)
 
-  let envelope: Uint8Array
-  const encodeOpts = {
-    appMetadata: options.appMetadata,
-    chunkSize: result.chunkSize,
-    chunkCount: result.chunkCount,
-  }
-
-  if (envelopeRecipients) {
-    for (const r of envelopeRecipients) {
-      if (!r.wrappedKey || r.wrappedKey.length === 0) {
-        throw new MalformedEnvelopeError('Recipient must have a non-empty wrappedKey')
-      }
-    }
-    envelope = encodeCoseEncrypt(options.algorithm, result.iv, envelopeRecipients, encodeOpts)
-  } else {
-    envelope = encodeCoseEncrypt0(options.algorithm, result.iv, encodeOpts)
-  }
+  const envelope = encodeEnvelope(options.algorithm, result.iv, protectedHeaders)
 
   return assembleBlob(envelope, result.ciphertext)
 }
 
-export async function decrypt(blob: Uint8Array, cek: CEKBytes): Promise<Uint8Array> {
-  const parsed = parseBlob(blob)
-  const envelope = decodeCoseEnvelope(parsed.envelopeBytes)
+export async function encryptStream(
+  plaintext: ReadableStream<Uint8Array>,
+  cek: CEKBytes,
+  options: StreamEncryptOptions
+): Promise<ReadableStream<Uint8Array>> {
+  if (options.algorithm !== CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM) {
+    throw new UnsupportedSchemeError(options.algorithm)
+  }
+  validateCek(cek)
+  const chunkSize = options.chunkSize ?? DEFAULT_CHUNK_SIZE
+  if (chunkSize < MIN_CHUNK_SIZE) {
+    throw new FocEncryptionError(`Chunk size must be at least ${MIN_CHUNK_SIZE}`)
+  }
+  const objectNonce = getRandomValues(BASE_NONCE_LENGTH)
+  const scheme = new ChunkedAes256GcmStream({ chunkSize, objectNonce })
+  const protectedHeaders = getProtectedHeaderBytes(options.algorithm, {
+    appMetadata: options.appMetadata,
+    chunkSize,
+  })
+  const cekCopy = new Uint8Array(cek)
+  const key = await importProfileKey(cekCopy, options.algorithm, objectNonce)
+  const result = scheme.encryptStream(key, plaintext, options.plaintextLength, protectedHeaders, 'Encrypt0')
 
+  let envelope: Uint8Array
+  try {
+    envelope = encodeEnvelope(options.algorithm, result.iv, protectedHeaders)
+  } catch (error) {
+    await result.ciphertext.cancel(error)
+    throw error
+  }
+
+  const ciphertextReader = result.ciphertext.getReader()
+  let envelopeEmitted = false
+  return new ReadableStream<Uint8Array>({
+    pull: async (controller) => {
+      if (!envelopeEmitted) {
+        envelopeEmitted = true
+        controller.enqueue(envelope)
+        return
+      }
+      try {
+        const next = await ciphertextReader.read()
+        if (next.done) {
+          ciphertextReader.releaseLock()
+          controller.close()
+        } else {
+          controller.enqueue(next.value)
+        }
+      } catch (error) {
+        ciphertextReader.releaseLock()
+        controller.error(error)
+      }
+    },
+    cancel: async (reason: unknown) => {
+      try {
+        await ciphertextReader.cancel(reason)
+      } finally {
+        ciphertextReader.releaseLock()
+      }
+    },
+  })
+}
+
+export async function decrypt(blob: Uint8Array, cek: CEKBytes): Promise<Uint8Array> {
+  const envelope = decodeCoseEnvelope(blob)
+  const ciphertext = blob.subarray(envelope.envelopeSize)
+  const chunkCount = deriveChunkCount(envelope, ciphertext.length)
   const scheme = getScheme(envelope.algorithm, envelope.chunkSize)
 
   const cekCopy = new Uint8Array(cek)
-  const key = await importAndZeroCek(cekCopy)
+  const key = await importProfileKey(cekCopy, envelope.algorithm, envelope.iv)
 
-  const context = encStructureContext(envelope.tag)
-  const metadata: DecryptMetadata = { chunkSize: envelope.chunkSize, chunkCount: envelope.chunkCount }
-  return scheme.decrypt(key, parsed.ciphertext, envelope.iv, envelope.protectedHeaders, context, metadata)
+  const metadata: DecryptMetadata = { chunkSize: envelope.chunkSize, chunkCount }
+  return scheme.decrypt(key, ciphertext, envelope.iv, envelope.protectedHeaders, 'Encrypt0', metadata)
 }
+
+const MAX_DECRYPT_RANGE = 16 * 1024 * 1024
+const MAX_CIPHERTEXT_BATCH = MAX_CHUNK_SIZE + AES_GCM_TAG_LENGTH
 
 export async function decryptRange(
   fetcher: BlobFetcher,
@@ -104,53 +205,79 @@ export async function decryptRange(
   cek: CEKBytes,
   range: ByteRange
 ): Promise<Uint8Array> {
-  const scheme = getScheme(metadata.algorithm, metadata.chunkSize)
+  if (
+    !Number.isSafeInteger(range.offset) ||
+    range.offset < 0 ||
+    !Number.isSafeInteger(range.length) ||
+    range.length < 0 ||
+    range.length > MAX_DECRYPT_RANGE ||
+    !Number.isSafeInteger(range.offset + range.length) ||
+    !Number.isSafeInteger(metadata.plaintextSize) ||
+    metadata.plaintextSize < 0 ||
+    range.offset + range.length > metadata.plaintextSize
+  ) {
+    throw new FocEncryptionError('Invalid decryption range')
+  }
+  if (range.length === 0) return new Uint8Array()
 
+  const scheme = getScheme(metadata.algorithm, metadata.chunkSize)
   if (!scheme.isSeekable) {
     throw new SchemeNotSeekableError(
       `Scheme ${scheme.name} (algorithm ${scheme.algorithmId}) does not support range decryption`
     )
   }
 
+  const chunkCount = metadata.chunkCount
+  if (!Number.isSafeInteger(chunkCount) || chunkCount === undefined || chunkCount <= 0) {
+    throw new MalformedEnvelopeError('Chunk count must be a positive safe integer')
+  }
+
   const cekCopy = new Uint8Array(cek)
-  const key = await importAndZeroCek(cekCopy)
-
+  const key = await importProfileKey(cekCopy, metadata.algorithm, metadata.iv)
   const chunkedScheme = scheme as ChunkedAes256GcmStream
-  const effectiveChunkSize = metadata.chunkSize ?? DEFAULT_CHUNK_SIZE
-  const tagLength = 16
-  const ciphertextChunkSize = effectiveChunkSize + tagLength
+  const chunkSize = metadata.chunkSize ?? DEFAULT_CHUNK_SIZE
+  const ciphertextChunkSize = chunkSize + AES_GCM_TAG_LENGTH
+  const chunksPerBatch = Math.max(1, Math.floor(MAX_CIPHERTEXT_BATCH / ciphertextChunkSize))
+  const firstChunk = Math.floor(range.offset / chunkSize)
+  const lastChunk = Math.min(Math.floor((range.offset + range.length - 1) / chunkSize), chunkCount - 1)
+  const rangeEnd = range.offset + range.length
+  const output = new Uint8Array(range.length)
+  let outputLength = 0
+  const context = 'Encrypt0'
 
-  const firstChunk = Math.floor(range.offset / effectiveChunkSize)
-  const lastChunk = Math.min(
-    Math.floor((range.offset + range.length - 1) / effectiveChunkSize),
-    (metadata.chunkCount ?? 1) - 1
-  )
-  const ctStart = metadata.envelopeSize + firstChunk * ciphertextChunkSize
-  const ctEnd =
-    lastChunk === (metadata.chunkCount ?? 1) - 1
-      ? undefined // fetch to end for last chunk (may be shorter)
-      : metadata.envelopeSize + (lastChunk + 1) * ciphertextChunkSize
+  for (let batchFirst = firstChunk; batchFirst <= lastChunk; ) {
+    const batchLast = Math.min(lastChunk, batchFirst + chunksPerBatch - 1)
+    const batchChunkCount = batchLast - batchFirst + 1
+    const ciphertextStart = metadata.envelopeSize + batchFirst * ciphertextChunkSize
+    const ciphertextLength = batchChunkCount * ciphertextChunkSize
+    const fetched = await fetcher.fetchRange(ciphertextStart, ciphertextLength)
+    const batchPlaintextStart = batchFirst * chunkSize
+    const requestedStart = Math.max(range.offset, batchPlaintextStart)
+    const requestedEnd = Math.min(rangeEnd, batchPlaintextStart + batchChunkCount * chunkSize)
+    const requestedLength = requestedEnd - requestedStart
+    const decrypted = await chunkedScheme.decryptRange(
+      key,
+      fetched,
+      metadata.iv,
+      metadata.protectedHeaders,
+      context,
+      requestedStart - batchPlaintextStart,
+      requestedLength,
+      chunkSize,
+      chunkCount,
+      batchFirst
+    )
+    output.set(decrypted, requestedStart - range.offset)
+    outputLength = requestedStart - range.offset + decrypted.length
+    decrypted.fill(0)
+    batchFirst = batchLast + 1
+  }
 
-  const fetchLength = ctEnd !== undefined ? ctEnd - ctStart : (lastChunk - firstChunk + 1) * ciphertextChunkSize // overfetch last chunk is OK
-  const fetched = await fetcher.fetchRange(ctStart, fetchLength)
-
-  const context = encStructureContext(metadata.tag)
-  return chunkedScheme.decryptRange(
-    key,
-    fetched,
-    metadata.iv,
-    metadata.protectedHeaders,
-    context,
-    range.offset - firstChunk * effectiveChunkSize,
-    range.length,
-    effectiveChunkSize,
-    metadata.chunkCount,
-    firstChunk
-  )
+  return outputLength === output.length ? output : output.slice(0, outputLength)
 }
 
-function parseEnvelopeBytes(blob: Uint8Array): EnvelopeMetadata {
-  let envelope: ReturnType<typeof decodeCoseEnvelope>
+function parseEnvelopeBytes(blob: Uint8Array, totalSize = blob.length): EnvelopeMetadata {
+  let envelope: DecodedEnvelope
   try {
     envelope = decodeCoseEnvelope(blob)
   } catch (e) {
@@ -159,31 +286,64 @@ function parseEnvelopeBytes(blob: Uint8Array): EnvelopeMetadata {
   }
 
   const seekable = envelope.algorithm === CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM
+  const ciphertextLength = totalSize - envelope.envelopeSize
+  const chunkCount = deriveChunkCount(envelope, ciphertextLength)
 
   let appMetadata: AppMetadata | undefined
   if (envelope.appMetadata) {
     appMetadata = Object.fromEntries(envelope.appMetadata) as AppMetadata
   }
+  const plaintextSize =
+    chunkCount === undefined
+      ? ciphertextLength - AES_GCM_TAG_LENGTH
+      : ciphertextLength - chunkCount * AES_GCM_TAG_LENGTH
+  if (
+    appMetadata?.plaintext_size !== undefined &&
+    (!Number.isSafeInteger(appMetadata.plaintext_size) || appMetadata.plaintext_size !== plaintextSize)
+  ) {
+    throw new MalformedEnvelopeError('Authenticated plaintext size does not match ciphertext geometry')
+  }
 
   return {
     tag: envelope.tag,
+    profileVersion: envelope.profileVersion,
     algorithm: envelope.algorithm as CoseAlgorithmId,
     seekable,
     iv: envelope.iv,
     protectedHeaders: envelope.protectedHeaders,
     chunkSize: envelope.chunkSize,
-    chunkCount: envelope.chunkCount,
+    chunkCount,
+    plaintextSize,
     appMetadata,
-    recipients: envelope.recipients,
     envelopeSize: envelope.envelopeSize,
+  }
+}
+
+const INITIAL_ENVELOPE_PROBE = 4096
+const MAX_ENVELOPE_PROBE = 1024 * 1024
+
+async function parseRemoteEnvelope(fetcher: BlobFetcher): Promise<EnvelopeMetadata> {
+  const totalSize = await fetcher.getSize()
+  if (!Number.isSafeInteger(totalSize) || totalSize <= 0) {
+    throw new MalformedEnvelopeError('Encrypted object has an invalid total size')
+  }
+  let probeSize = Math.min(INITIAL_ENVELOPE_PROBE, totalSize)
+  for (;;) {
+    const bytes = await fetcher.fetchRange(0, probeSize)
+    try {
+      return parseEnvelopeBytes(bytes, totalSize)
+    } catch (error) {
+      if (!(error instanceof MalformedEnvelopeError) || probeSize >= totalSize) throw error
+      if (probeSize >= MAX_ENVELOPE_PROBE) {
+        throw new MalformedEnvelopeError('FEE envelope exceeds the maximum probe size', { cause: error })
+      }
+      probeSize = Math.min(totalSize, probeSize * 2, MAX_ENVELOPE_PROBE)
+    }
   }
 }
 
 export function parseEnvelope(blob: Uint8Array): EnvelopeMetadata
 export function parseEnvelope(fetcher: BlobFetcher): Promise<EnvelopeMetadata>
 export function parseEnvelope(blob: Uint8Array | BlobFetcher): EnvelopeMetadata | Promise<EnvelopeMetadata> {
-  if (blob instanceof Uint8Array) {
-    return parseEnvelopeBytes(blob)
-  }
-  return blob.fetchEnvelope().then(parseEnvelopeBytes)
+  return blob instanceof Uint8Array ? parseEnvelopeBytes(blob) : parseRemoteEnvelope(blob)
 }

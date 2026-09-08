@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { detectContentType } from '../src/render.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { detectContentType, isBinaryPreviewType, renderContent } from '../src/render.js'
 
 function bytes(...values: number[]): Uint8Array {
   return new Uint8Array(values)
@@ -68,3 +68,37 @@ describe('detectContentType', () => {
     expect(await detectContentType(data)).toBe('application/octet-stream')
   })
 })
+
+describe('isBinaryPreviewType', () => {
+  it('allows only browser-preview binary formats above the document cap', () => {
+    expect(isBinaryPreviewType('image/jpeg')).toBe(true)
+    expect(isBinaryPreviewType('audio/mpeg')).toBe(true)
+    expect(isBinaryPreviewType('video/mp4')).toBe(true)
+    expect(isBinaryPreviewType('application/pdf')).toBe(true)
+    expect(isBinaryPreviewType('text/html')).toBe(false)
+    expect(isBinaryPreviewType('text/plain')).toBe(false)
+    expect(isBinaryPreviewType('application/octet-stream')).toBe(false)
+  })
+})
+
+describe('renderContent', () => {
+  it('renders buffered video with playback controls and a download link', () => {
+    const createObjectURL = vi.fn(() => 'blob:video')
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL: vi.fn() })
+    const container = {
+      classList: { add: vi.fn() },
+      innerHTML: '',
+    } as unknown as HTMLElement
+
+    renderContent(container, bytes(0x00, 0x00, 0x00, 0x18), 'video/mp4')
+
+    expect(createObjectURL).toHaveBeenCalledOnce()
+    expect(container.innerHTML).toContain('<video controls preload="metadata" src="blob:video"></video>')
+    expect(container.innerHTML).toContain('Download media')
+  })
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+

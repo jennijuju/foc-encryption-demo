@@ -1,262 +1,138 @@
-# foc-encryption Library Reference
+# Filecoin Encryption Envelope TypeScript library
 
-## 1. Public API Exports
+## Status
 
-From `/src/index.ts`, the library exports:
+This repository contains a local review candidate for the Filecoin Encryption Envelope (FEE) TypeScript library, a secret-safe protector module, and a browser viewer. It is not published, audited, or production-ready. The implemented wire profile is versioned locally and must receive independent cryptographic and browser-security review before any release-candidate claim.
 
-### Functions
-- **`encrypt()`** - Encrypts plaintext into a COSE envelope + ciphertext blob
-- **`decrypt()`** - Decrypts a full blob with a content encryption key (CEK)
-- **`decryptRange()`** - Decrypts a byte range from seekable encrypted blobs (streaming)
-- **`parseEnvelope()`** - Parses envelope metadata (sync or async via BlobFetcher)
+The live Filecoin proposal remains [FIPs discussion #1253](https://github.com/filecoin-project/FIPs/discussions/1253), not an approved FIP or FRC. This implementation follows its Encrypt0 envelope shape, Filecoin media type, authenticated metadata direction, chunked algorithm, and chunk-size bounds while adding an explicit local profile version.
 
-### Constants
-- **`CoseAlgorithm`** - Algorithm IDs (3 = AES_256_GCM, -65793 = CHUNKED_AES_256_GCM_STREAM)
-- **`CoseHeaderParam`** - Custom header labels for chunk size, chunk count, and app metadata
-- **`FOC_ENVELOPE_TYPE`** - Content type identifier: `'application/vnd.foc-envelope+cose'`
+## Public interface
 
-### Types
-- **`CEKBytes`** - 32-byte content encryption key (Uint8Array)
-- **`EncryptOptions`** - SimpleEncryptOptions or ChunkedEncryptOptions
-- **`ChunkedEncryptOptions`** - Options for seekable encryption (algorithm -65793, optional chunkSize)
-- **`SimpleEncryptOptions`** - Non-seekable encryption (algorithm 3)
-- **`AppMetadata`** - Application-level metadata (CID, custom fields as bytes/strings/numbers)
-- **`EnvelopeMetadata`** - Parsed envelope metadata (algorithm, seekable flag, IV, protected headers, chunk info, recipients, envelope size)
-- **`BlobFetcher`** - Interface for range-based fetching without loading entire blob
-- **`ByteRange`** - Plaintext coordinate range (offset, length)
-- **`Recipient` / `RecipientInfo`** - Multi-recipient key descriptors
+`packages/foc-encryption/src/index.ts` exports:
 
-### Error Classes
-- **`FocEncryptionError`** - Base class
-- **`InvalidKeyError`** - CEK validation failures
-- **`AuthenticationError`** - AEAD verification failed (wrong key or tampered ciphertext)
-- **`MalformedEnvelopeError`** - Invalid COSE envelope
-- **`UnsupportedSchemeError`** - Unknown algorithm ID
-- **`SchemeNotSeekableError`** - Range decryption on non-seekable scheme
+- `encrypt(plaintext, cek, options)`: encrypt a complete byte array.
+- `encryptStream(stream, cek, options)`: encrypt a declared-length stream with bounded memory.
+- `decrypt(blob, cek)`: decrypt a complete in-memory object.
+- `decryptRange(fetcher, metadata, cek, range)`: authenticate and decrypt a plaintext-coordinate range from a seekable object.
+- `parseEnvelope(blob | fetcher)`: validate the FEE v1 envelope and return authenticated metadata and derived chunk geometry.
+- `createHttpBlobFetcher(url, fetch?)`: strict HTTP Range adapter.
+- `deriveKey(source, salt?)`: derive a 32-byte content-encryption key from a password/access key or parse raw 32-byte hexadecimal key material.
+- `CoseAlgorithm`, `CoseHeaderParam`, `MAX_CHUNK_SIZE`, typed option/result interfaces, and typed errors.
 
----
+The v1 product profile supports `COSE_Encrypt0` only. Multi-recipient descriptors are not part of this release. X25519 and KMS recipient modes require a complete wrapping, unwrapping, identity, recovery, and browser design rather than opaque metadata placeholders.
 
-## 2. Encryption/Decryption & Envelope Format
+## FEE v1 object
 
-### Blob Structure
+A stored object is one self-delimiting CBOR/COSE envelope followed by detached ciphertext:
 
-The encrypted blob is binary-concatenated: `[COSE_Envelope][Ciphertext]`
+```text
+[COSE_Encrypt0 envelope][ciphertext]
+```
 
-### COSE_Encrypt0 (Non-seekable, Algorithm 3)
-- CBOR tag 16
-- Structure: `[protected_headers, unprotected_map, null]`
-- Protected headers include algorithm ID and content type
-- Unprotected headers include:
-  - IV (initialization vector, 12 bytes)
-  - APP_METADATA (optional, stored as a Map)
-- Uses single 12-byte random IV per encryption
-- Ciphertext = plaintext encrypted with AES-256-GCM, includes 16-byte authentication tag
+The protected header map is authenticated as AES-GCM additional authenticated data. It contains:
 
-### COSE_Encrypt (Multi-recipient, Algorithm 3 or -65793)
-- CBOR tag 96
-- Structure: `[protected_headers, unprotected_map, null, recipients_array]`
-- Recipients array contains wrapped keys for each recipient
-- Each recipient has algorithm, keyId (optional), and wrappedKey
+| Label | Meaning | Rule |
+|---:|---|---|
+| `1` | Algorithm | `3` for AES-256-GCM or `-65793` for chunked AES-256-GCM-STREAM |
+| `16` | Type | `application/vnd.filecoin-encryption+cose` |
+| `-65794` | Local profile version | Integer `1` |
+| `-1` | Chunk size | Required only for chunked encryption; 4 KiB through 16 MiB; default 256 KiB |
+| `-65792` | Application metadata | Optional string-keyed map with bounded scalar or byte-string values |
 
-### Chunked-AES-256-GCM-STREAM (Seekable, Algorithm -65793)
-- CBOR tag 16 or 96
-- Same envelope structure as above
-- Additional unprotected headers:
-  - CHUNK_SIZE (plaintext chunk size, default 256 KiB)
-  - CHUNK_COUNT (total number of chunks)
-- Nonce derivation per chunk:
-  ```
-  nonce[0..6]   = base_nonce[0..6] (7 bytes)
-  nonce[7..10]  = chunk_index (4 bytes, big-endian)
-  nonce[11]     = last_flag (0x00 or 0x01)
-  ```
-- Each chunk independently encrypted with AES-256-GCM (plaintext chunk + 16-byte tag)
-- Allows decrypting arbitrary ranges without decrypting entire file
+The unprotected header map contains only label `5`, a fresh 12-byte random nonce. Changing the nonce causes authentication failure.
 
-### Envelope Metadata (from parseEnvelope)
-- `algorithm` - Algorithm ID (3 or -65793)
-- `seekable` - Boolean (true for chunked scheme)
-- `iv` - Base nonce bytes
-- `protectedHeaders` - CBOR-encoded protected map
-- `chunkSize` / `chunkCount` - Present only for chunked encryption
-- `appMetadata` - Custom application data (Object)
-- `recipients` - Array of RecipientInfo
-- `envelopeSize` - Byte offset where ciphertext starts
+The envelope is limited to 1 MiB. Application metadata is limited to 32 entries, 128 characters per key, and 64 KiB per string or byte-string value. Unknown protected or unprotected parameters, wrong types, unsupported versions, wrong media types, non-nil embedded payloads, invalid array lengths, and invalid chunk geometry are rejected.
 
----
+Chunk count is not stored. Consumers derive it from the authenticated chunk size and total ciphertext length. The final encrypted chunk must contain at least its 16-byte authentication tag and no more than one complete encrypted chunk.
 
-## 3. File Fetching & Decryption (Range-based)
+## Chunked encryption
 
-### BlobFetcher Interface
+The chunked scheme uses algorithm `-65793`. Each object carries a fresh random 96-bit object nonce. HKDF-SHA-256 derives an object-specific AES-256-GCM key from the caller’s CEK, that nonce as salt, and the fixed info string `FEE v1 chunked AES-256-GCM object key`.
+
+Each plaintext chunk is sealed independently under that object key. Its 96-bit AES-GCM nonce is eight zero bytes followed by the unsigned 32-bit big-endian chunk index. The one-byte external AAD is `0x01` for the final chunk and `0x00` otherwise. This authenticated final marker detects truncation. Reusing a caller CEK across objects remains safe while the 96-bit object nonce stays unique; reordering, insertion, deletion, wrong keys, changed protected metadata, or changed ciphertext causes authentication failure.
+
+`decryptRange` accepts plaintext coordinates. It rejects ranges beyond authenticated plaintext EOF, fetches only the encrypted chunks needed for an accepted range, and caps one requested plaintext range at 16 MiB. Callers must not render or save partial plaintext after an authentication failure.
+
+## Remote object interface
+
+A range source implements:
 
 ```typescript
 interface BlobFetcher {
-  fetchEnvelope(): Promise<Uint8Array>    // Fetch first ~4KB (envelope only)
+  getSize(): Promise<number>
   fetchRange(offset: number, length: number): Promise<Uint8Array>
 }
 ```
 
-### Range Decryption Flow (decryptRange)
+`parseEnvelope(fetcher)` starts with a 4 KiB probe and doubles it only when needed, up to the 1 MiB envelope limit. Total object size is required because chunk count and plaintext geometry are derived rather than trusted from redundant metadata.
 
-1. Calculate which encrypted chunks contain the requested byte range
-2. Calculate ciphertext offsets accounting for chunk headers + 16-byte tags
-3. Fetch only those chunks from the blob
-4. Decrypt chunks independently using derived nonces
-5. Slice result to exact requested range
+The HTTP adapter requires status `206`, an exact safe-integer `Content-Range`, an exact requested start and end, a stable total size, and a response body whose length matches the range. It rejects ignored, shortened, oversized, inconsistent, unsafe, or malformed range responses.
 
-### Key Math
-- Ciphertext chunk size = `plaintext_chunk_size + 16` (tag length)
-- First chunk offset = `envelope_size + first_chunk_index * ciphertext_chunk_size`
-- Nonce uses global chunk index (accounting for offset from remote fetch)
+## Access-key profile
 
-### Range Coordinate System
-- Offset/length are in **plaintext coordinates** (not ciphertext)
-- Enables seeking into large files without downloading entire blob
+The Engram protector generates an access key separately from the FEE core:
 
----
+```text
+engram_ + base64url(randomBytes(32))
+```
 
-## 4. "Retrieval URL" Concept
+The result contains 50 ASCII characters and 256 random bits. Base64url encodes only fresh random bytes. It does not encode the file, filename, Root CID, wallet, or user data. PBKDF2-SHA-256 with 600,000 iterations and a fresh 16-byte salt derives the content-encryption key. The protected ciphertext receives its Root CID afterward.
 
-This library doesn't directly define "retrieval URLs" but supports them through:
+The access key never belongs in arguments, ordinary process output, logs, URLs, filenames, ledgers, rendered indexes, or agent conversation. `foc-protect.mjs` writes it only to a dedicated inherited file descriptor. Engram persists it before reporting success and copies it only after an explicit request identifying the share.
 
-### URL Types (from demo)
-- **Direct HTTP/HTTPS URLs** - Can be passed to fetch with Range headers
-- **PieceCID references** - Filecoin storage system identifiers that resolve to URLs via Synapse SDK
-
-### URL-based Fetching (from `/demo/src/synapse.ts`)
+## Minimal example
 
 ```typescript
-function createBlobFetcher(url: string): BlobFetcher {
-  return {
-    async fetchEnvelope() {
-      const resp = await fetch(url, { headers: { Range: 'bytes=0-4095' } })
-      return new Uint8Array(await resp.arrayBuffer())
-    },
-    async fetchRange(offset: number, length: number) {
-      const resp = await fetch(url, {
-        headers: { Range: `bytes=${offset}-${offset + length - 1}` },
-      })
-      return new Uint8Array(await resp.arrayBuffer())
-    },
-  }
-}
-```
+import {
+  CoseAlgorithm,
+  decrypt,
+  encrypt,
+  parseEnvelope,
+} from 'foc-encryption'
 
-The "retrieval URL" is the HTTP endpoint serving the encrypted blob, supporting HTTP Range requests for efficient partial downloads.
-
----
-
-## 5. CLI Demo (003) Usage Patterns
-
-### Commands
-
-#### encrypt
-```
-foc-demo encrypt <file> --key <hex-key> --output <path>
-foc-demo encrypt <file> --password <password> --output <path>
-```
-- Auto-selects algorithm based on file size (>256 KiB → chunked)
-- Derives CEK from password using PBKDF2 (600K iterations, SHA-256)
-- Stores PBKDF2 parameters in appMetadata for decryption
-
-#### decrypt
-```
-foc-demo decrypt <file> --key <hex-key> --output <path>
-foc-demo decrypt <file> --password <password> --output <path>
-```
-- Loads encrypted blob locally
-- Parses envelope to extract PBKDF2 parameters if password used
-- Derives CEK and decrypts
-
-#### upload
-```
-foc-demo upload <file> --key <hex-key> --privateKey <private-key>
-foc-demo upload <file> --password <password> --privateKey <private-key>
-```
-- Encrypts file
-- Uploads to Filecoin via Synapse SDK
-- Returns PieceCID for retrieval
-
-#### download
-```
-foc-demo download <locator> --key <hex-key> --output <path>
-foc-demo download https://url/blob.enc --key <hex-key> --output <path>
-foc-demo download <piececid> --password <password> --privateKey <key> --output <path>
-```
-- Accepts URL or PieceCID locator
-- Fetches full blob and decrypts
-- Outputs plaintext to file
-
-#### range
-```
-foc-demo range <locator> --offset <bytes> --length <bytes> --key <hex-key> [--output <path>]
-```
-- Accepts seekable encrypted blob (HTTP URL or PieceCID)
-- Decrypts only requested byte range
-- Outputs to file or stdout
-- Only works with CHUNKED_AES_256_GCM_STREAM (fails gracefully on non-seekable)
-
-### Key Sources
-- `--key` expects 64 hex characters (256-bit key)
-- `--password` uses PBKDF2 with 16-byte random salt (stored in envelope)
-- Either password or key required, not both
-
----
-
-## 6. Usage Example (from tests)
-
-```typescript
-import { encrypt, decrypt, parseEnvelope, decryptRange, CoseAlgorithm } from 'foc-encryption'
-
-// Encryption
+const plaintext = new TextEncoder().encode('hello')
 const cek = crypto.getRandomValues(new Uint8Array(32))
-const plaintext = new TextEncoder().encode('Hello, World!')
 
-// Non-seekable
-const blob = await encrypt(plaintext, cek, {
-  algorithm: CoseAlgorithm.AES_256_GCM
-})
-
-// Seekable (chunked)
-const chunkedBlob = await encrypt(plaintext, cek, {
+const encrypted = await encrypt(plaintext, cek, {
   algorithm: CoseAlgorithm.CHUNKED_AES_256_GCM_STREAM,
-  chunkSize: 64 * 1024
+  chunkSize: 4096,
+  appMetadata: { content_type: 'text/plain' },
 })
 
-// Full decryption
-const decrypted = await decrypt(blob, cek)
-
-// Range decryption (seekable only)
-const meta = parseEnvelope(chunkedBlob)
-const fetcher = createBlobFetcher('https://example.com/file.enc')
-const range = await decryptRange(fetcher, meta, cek, { offset: 100, length: 50 })
-
-// Multi-recipient
-const recipients = [
-  { algorithm: -3, keyId: Buffer.from('alice'), wrappedKey: Buffer.from([...]) },
-  { algorithm: -3, keyId: Buffer.from('bob'), wrappedKey: Buffer.from([...]) }
-]
-const multiBlob = await encrypt(plaintext, cek, { algorithm: CoseAlgorithm.AES_256_GCM }, recipients)
+const metadata = parseEnvelope(encrypted)
+const restored = await decrypt(encrypted, cek)
 ```
 
----
+Callers retain ownership of their input key buffer. The implementation wipes mutable internal copies where possible, but JavaScript cannot guarantee erasure of strings, `CryptoKey` objects, browser caches, operating-system swap, or recipient-retained plaintext.
 
-## Key Design Insights
+## Agent artifact
 
-1. **Separation of Concerns**: Encryption algorithm (AES-256-GCM) is separate from envelope format (COSE) and seekability (chunking)
-2. **Safe Key Handling**: CEK is zeroed after use via `importAndZeroCek()`
-3. **Standards-Based**: Uses CBOR/COSE (RFC 9052) for interoperability
-4. **Keyless Inspection**: Envelope can be parsed without decryption key
-5. **Efficient Streaming**: Chunked mode enables HTTP Range requests for partial downloads
-6. **Extensible Metadata**: App-level metadata stored in envelope for custom data (CIDs, parameters, etc.)
+`packages/foc-demo/dist/foc-protect.mjs` is the focused agent interface. `.mjs` is Node's explicit ES-module extension and lets the prebuilt file run without a neighboring `package.json`.
 
----
+```text
+node foc-protect.mjs \
+  --input <file-or-directory> \
+  --output <new-neutral.fee> \
+  --access-key-output-fd 3
+```
 
-## Source Files Reference
+The process writes exactly one non-secret JSON result to stdout, diagnostics to stderr, and the generated access key only to descriptor 3. It accepts no password or key in command arguments. It rejects hard-linked sources, reads each validated source file to its exact snapshotted length, rechecks file identity and timestamps, rescans the selected tree, then writes final output through a mode-0600 temporary sibling synchronized and linked into place without overwriting an existing destination.
 
-- Main API: `/src/index.ts`, `/src/envelope.ts`
-- Types: `/src/types.ts`
-- Encryption schemes: `/src/schemes/aes-256-gcm.ts`, `/src/schemes/chunked-aes-256-gcm.ts`
-- COSE encoding/decoding: `/src/cose/encode.ts`, `/src/cose/decode.ts`
-- CLI demo: `/demo/src/cli.ts`, `/demo/src/commands/`
-- Tests with examples: `/tests/integration/encrypt-decrypt.test.ts`, `/tests/integration/seekable.test.ts`
+The source-byte preflight is not the final object limit. The generated ZIP, including its headers and directory, must also remain below 1000 MiB; a source close to the ceiling can be rejected after bounded local archive construction.
+
+## Browser contract
+
+The viewer accepts only `#cid=<encrypted-root-cid>`. It never accepts an access key in the URL.
+
+- Sanitized HTML and text render through 8 MiB.
+- Images, PDFs, audio, and video preview through 64 MiB.
+- Larger entries use an explicit download action; they are never accumulated in a `MediaSource` preview buffer.
+- Unsupported download sinks show an explicit failure. The viewer never downloads automatically and never buffers the complete large object.
+- The complete protected file or folder must remain below 1000 MiB.
+- Large downloads stream decrypted bytes to a supported disk sink. They never fall back to buffering the complete object.
+
+Decrypted HTML is static. Scripts, event handlers, forms, frames, refresh, anchors, active SVG, resource/navigation URLs, parent access, and top navigation are removed. The access-key field accepts only the exact 50-character generated format. The archive exposes `close()`, closes its ZIP reader, and best-effort wipes the mutable content-encryption key after one-shot render, successful one-shot download, or page disposal; folder archives remain open only while browsing.
+
+## Review requirements
+
+Before any release-candidate label or external publication, an independent review must cover the wire profile, nonce and key rules, authenticated metadata, hostile CBOR/COSE parsing, range geometry, partial plaintext semantics, transactional filesystem behavior, access-key transport and recovery, archive traversal, HTML sanitization, browser download paths, dependency provenance, and reproducible builds. Passing tests and cross-implementation vectors are inputs to that review, not substitutes for it.

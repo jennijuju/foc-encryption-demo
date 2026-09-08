@@ -1,139 +1,108 @@
-# foc-encryption
+# Filecoin Encryption Envelope
 
-**Client-side encryption for the Filecoin On-chain Cloud (FOC)**
+Local TypeScript implementation of the Filecoin Encryption Envelope (FEE), with a focused agent encryptor and an immutable browser viewer.
 
-Encrypt files locally, store them on Filecoin warm storage, and share them via a link — all without trusting a server with your plaintext data. Recipients decrypt in-browser using only a password.
+## Status
 
-## Live Demo
+This worktree is a local independent-review candidate. It is not published, audited, or production-ready. The future repository name selected for release is `filecoin-encryption-envelope`; no repository rename, package release, public pin, or other external action is part of this implementation.
 
-Try it now — open the viewer and enter the password `hardPasswordSure`:
-
-[**Open encrypted content in viewer**](https://bafybeifmoyptennzufqyp2id3ufa4yfyumrrz7ci4ok4sufwltggzy24nu.ipfs.dweb.link/#url=https%3A%2F%2Fcalib2.ezpdpz.net%2Fpiece%2Fbafkzcibeudqbmed2hq75hjwry67454ubmecbcqltv7mhvxh7yaw2ztvvqjbhjeeyei)
-
-The viewer is a single HTML file hosted on IPFS. The encrypted blob lives on Filecoin warm storage. Decryption happens entirely in your browser.
-
-## How It Works
-
-```
-                       FOC Warm Storage (Filecoin)
-                              ┌─────────┐
-  encrypt ──► upload ────────►│encrypted│
-                              │  blob   │
-  viewer  ◄── download ◄──────│         │
-  (IPFS)      + decrypt       └─────────┘
-     │           ▲
-     │     PBKDF2 key
-     │     derivation
-     ▼
-  plaintext
-  in browser
-```
-
-1. **Encrypt** — files are encrypted client-side with AES-256-GCM, wrapped in a [COSE](https://datatracker.ietf.org/doc/rfc9052/) envelope (CBOR-encoded)
-2. **Store** — encrypted blobs are uploaded to Filecoin warm storage via [synapse-sdk](https://github.com/filoz/synapse-sdk)
-3. **Share** — generate a link containing the retrieval URL (and optionally the password)
-4. **View** — the viewer SPA (a single HTML file, also hosted on IPFS) fetches the blob, derives the key via PBKDF2, decrypts in-browser, and renders the content
-
-No server ever sees the plaintext. The encryption envelope follows [RFC 9052 (COSE)](https://datatracker.ietf.org/doc/rfc9052/) to enable future interoperability with other key management solutions.
-
-## Key Features
-
-- **Standards-based encryption** — COSE envelopes with AES-256-GCM, CBOR serialization
-- **Seekable decryption** — large files (>256 KiB) use chunked encryption, enabling efficient HTTP Range-based partial decryption
-- **Zero-trust sharing** — encrypted at rest on Filecoin; decryption happens only in the recipient's browser
-- **Self-contained viewer** — single HTML file with inlined JS, hostable anywhere (IPFS, S3, local file)
-- **Password or raw key** — PBKDF2-derived keys for passwords (600K iterations, SHA-256), or bring your own 256-bit key
-- **Multi-recipient support** — COSE_Encrypt envelopes can wrap keys for multiple recipients
+The live format proposal is [Filecoin FIPs discussion #1253](https://github.com/filecoin-project/FIPs/discussions/1253). That discussion is not an approved FIP or FRC. The local v1 product profile corrects and versions the working implementation so it can be reviewed without claiming standards approval.
 
 ## Packages
 
-| Package | Description |
-|---------|-------------|
-| [`foc-encryption`](packages/foc-encryption/) | Core library — AES-256-GCM encryption envelopes with CBOR/COSE serialization |
-| [`foc-demo`](packages/foc-demo/) | CLI tool — encrypt, decrypt, upload, download, and range-decrypt files via FOC |
-| [`foc-viewer`](packages/foc-viewer/) | Web viewer — single-file SPA that decrypts and renders content in-browser |
+| Package | Purpose |
+|---|---|
+| [`foc-encryption`](packages/foc-encryption/) | TypeScript FEE library for complete, streaming, and range-based authenticated encryption |
+| [`foc-demo`](packages/foc-demo/) | Development commands plus the focused `foc-protect.mjs` agent artifact |
+| [`foc-viewer`](packages/foc-viewer/) | Single-file browser viewer for password-protected file and folder shares |
 
-## Quick Start
+The production candidate contains only the focused library, protector, viewer, specifications, types, checksums, and non-secret examples. The broader demo CLI is not a production interface because some development commands accept passwords, raw keys, or storage credentials in arguments.
 
-### Prerequisites
+## Build locally
 
-- Node.js 20+
-- pnpm 10+
-
-### Build
+Requires Node 20 or newer and pnpm 10.
 
 ```bash
 pnpm install
 pnpm build
 ```
 
-### Encrypt and upload a file
+Build the focused agent artifact:
 
 ```bash
-# Set your Filecoin Calibration testnet wallet key
-export PRIVATE_KEY=0xabcdef...
-
-# Encrypt and upload
-node packages/foc-demo/dist/cli.js upload myfile.pdf --password "my secret"
-# → PieceCID:      baga6ea4seaq...
-# → Retrieval URL: https://calib2.ezpdpz.net/piece/baga6ea4seaq...
+pnpm --filter foc-demo build:protect
 ```
 
-### Share it
-
-The retrieval URL can be opened directly in the viewer — no wallet needed:
-
-```
-https://bafybeifmoyptennzufqyp2id3ufa4yfyumrrz7ci4ok4sufwltggzy24nu.ipfs.dweb.link/#url=<retrieval-url>&pw=<password>
-```
-
-Or share the link without the password and let the recipient enter it manually.
-
-### Local encrypt/decrypt (no Filecoin)
+Build the single-file viewer:
 
 ```bash
-# Encrypt
-node packages/foc-demo/dist/cli.js encrypt myfile.pdf --password "secret" --output myfile.pdf.enc
-
-# Decrypt
-node packages/foc-demo/dist/cli.js decrypt myfile.pdf.enc --password "secret" --output myfile.pdf
+pnpm --filter foc-viewer build
 ```
 
-See [`packages/foc-demo/README.md`](packages/foc-demo/README.md) for full CLI documentation.
+## Agent encryption interface
 
-## Architecture
+The agent runs one prebuilt ES module. The generated access key leaves only through an inherited file descriptor.
 
-```
-packages/
-├── foc-encryption/    Core library (encrypt, decrypt, COSE envelopes)
-│   └── used by both foc-demo and foc-viewer
-├── foc-demo/          CLI for encrypt/decrypt/upload/download
-│   └── uses synapse-sdk for Filecoin storage
-└── foc-viewer/        Browser SPA for decrypting shared content
-    └── built as a single HTML file via Vite
+```text
+node packages/foc-demo/dist/foc-protect.mjs \
+  --input <file-or-directory> \
+  --output <new-neutral.fee> \
+  --access-key-output-fd 3
 ```
 
-### Encryption Format
+Stdout contains one non-secret JSON result. Stderr contains diagnostics. The access key must never enter arguments, stdout, stderr, logs, URLs, filenames, ledgers, rendered indexes, or agent conversation.
 
-The binary blob is structured as:
+New access keys use this format:
 
+```text
+engram_ + base64url(randomBytes(32))
 ```
-[COSE Envelope (CBOR)] [Ciphertext]
+
+This is a 50-character opaque bearer secret with 256 random bits. It is designed for copy and paste, not manual transcription. It does not encode the file or its Root CID.
+
+## FEE v1 profile
+
+A FEE object is one self-delimiting COSE/CBOR envelope followed by detached ciphertext:
+
+```text
+[COSE_Encrypt0 envelope][ciphertext]
 ```
 
-- **Small files (≤256 KiB):** AES-256-GCM — single encrypt/decrypt
-- **Large files (>256 KiB):** Chunked AES-256-GCM — seekable, supports HTTP Range decryption
+The v1 password-share profile:
 
-The COSE envelope contains the algorithm identifier, IV, recipient key info, and application metadata (e.g. PBKDF2 salt). This design decouples key management from the data path, allowing future integration with distributed key management.
+- Authenticates algorithm, media type, profile version, chunk size, and application metadata.
+- Leaves only the nonce in the unprotected map.
+- Supports AES-256-GCM and chunked AES-256-GCM-STREAM.
+- Uses 256 KiB chunks by default and accepts 4 KiB through 16 MiB.
+- Derives chunk count from authenticated chunk size and total ciphertext length.
+- Limits the encoded envelope and every metadata structure.
+- Rejects multi-recipient envelopes until wrapping, unwrapping, identity, recovery, and browser support exist end to end.
 
-## Development
+See [`docs/foc-encryption-library.md`](docs/foc-encryption-library.md) for the interface and security contract.
+
+## Browser viewer
+
+The viewer URL contains only an encrypted Root CID:
+
+```text
+https://<viewer-origin>/#cid=<encrypted-root-cid>
+```
+
+The recipient pastes the separately delivered access key. The link alone exposes public ciphertext but cannot decrypt it. Anyone who receives both the link and the access key can view and forward both; this is bearer access, not recipient identity or revocation.
+
+The viewer sanitizes HTML into static markup, distinguishes authentication failures from retrieval failures, bounds in-memory previews, offers explicit download fallback for unsupported large media, and exposes archive disposal so mutable key material can be wiped where JavaScript permits.
+
+## Validation
+
+Run focused package tests while developing. Run the complete workspace validation once after the candidate and review corrections settle.
 
 ```bash
-pnpm install
-pnpm build
-pnpm test
-pnpx biome check .   # lint + format
+pnpm --filter foc-encryption test
+pnpm --filter foc-demo test
+pnpm --filter foc-viewer test
 ```
+
+Generated `.fee` smoke artifacts remain in private temporary directories and are deleted. No user-data fixture is committed. Live Filecoin state is not part of deterministic tests.
 
 ## License
 
