@@ -36,17 +36,31 @@ export function isBinaryPreviewType(contentType: string): boolean {
   )
 }
 
-export function renderContent(container: HTMLElement, data: Uint8Array, contentType: string): void {
+export function renderContent(
+  container: HTMLElement,
+  data: Uint8Array,
+  contentType: string,
+  filename = 'decrypted-content'
+): void {
   revokeRenderedObjectUrls(container)
-  if (contentType === 'text/html') {
-    container.replaceChildren(createLockedHtmlFrame(new TextDecoder().decode(data)))
-    return
-  }
-
   const blob = new Blob([data as Uint8Array<ArrayBuffer>], { type: contentType })
   const objectUrl = URL.createObjectURL(blob)
   activeObjectUrls.set(container, [objectUrl])
-  const filename = 'decrypted-content'
+
+  if (contentType === 'text/html') {
+    container.classList.add('wide')
+    const wrapper = document.createElement('div')
+    wrapper.className = 'content-wrapper'
+    wrapper.append(createLockedHtmlFrame(new TextDecoder().decode(data)))
+    const download = document.createElement('a')
+    download.className = 'download-link'
+    download.href = objectUrl
+    download.download = filename
+    download.textContent = 'Download file'
+    wrapper.append(download)
+    container.replaceChildren(wrapper)
+    return
+  }
 
   if (contentType.startsWith('image/')) {
     container.classList.add('wide')
@@ -75,7 +89,7 @@ export function renderContent(container: HTMLElement, data: Uint8Array, contentT
     container.innerHTML = `
       <div class="content-wrapper">
         <embed src="${objectUrl}" type="application/pdf" width="100%" height="600px" />
-        <a class="download-link" href="${objectUrl}" download="${escapeHtml(filename)}.pdf">Download PDF</a>
+        <a class="download-link" href="${objectUrl}" download="${escapeHtml(filename)}">Download PDF</a>
       </div>
     `
     return
@@ -86,7 +100,7 @@ export function renderContent(container: HTMLElement, data: Uint8Array, contentT
     container.innerHTML = `
       <div class="content-wrapper">
         <pre>${escapeHtml(text)}</pre>
-        <a class="download-link" href="${objectUrl}" download="${escapeHtml(filename)}.txt">Download text</a>
+        <a class="download-link" href="${objectUrl}" download="${escapeHtml(filename)}">Download text</a>
       </div>
     `
     return

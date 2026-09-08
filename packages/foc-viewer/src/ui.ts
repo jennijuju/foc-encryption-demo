@@ -146,6 +146,60 @@ function buildArchiveTree(entries: readonly ProtectedEntry[]): Map<string, Archi
   return roots
 }
 
+const CHEVRON_SVG =
+  '<svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+const FOLDER_SVG =
+  '<svg class="row-icon folder" viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 5.5A1.5 1.5 0 0 1 4 4h4l1.6 1.8H16a1.5 1.5 0 0 1 1.5 1.5v7.2A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5z" fill="currentColor"/></svg>'
+const FILE_SVG =
+  '<svg class="row-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5.5 2.5h6L15.5 6.5v10a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M11.5 2.5v4h4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>'
+const IMAGE_SVG =
+  '<svg class="row-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="7" cy="8.5" r="1.4" fill="currentColor"/><path d="M4.5 14.5l3.8-3.6 2.6 2.4 2.7-3 3 4.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>'
+const MEDIA_SVG =
+  '<svg class="row-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.25" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8.5 7.2l4.4 2.8-4.4 2.8z" fill="currentColor"/></svg>'
+
+function iconFor(entry: ProtectedEntry | undefined): string {
+  const type = entry?.contentType ?? ''
+  if (type.startsWith('image/')) return IMAGE_SVG
+  if (type.startsWith('video/') || type.startsWith('audio/')) return MEDIA_SVG
+  return FILE_SVG
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes
+  let unit = 'B'
+  for (const next of units) {
+    if (value < 1024) break
+    value /= 1024
+    unit = next
+  }
+  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} ${unit}`
+}
+
+function countFiles(node: ArchiveTreeNode): number {
+  let total = node.entry && !node.entry.directory ? 1 : 0
+  for (const child of node.children.values()) total += countFiles(child)
+  return total
+}
+
+function makeRow(iconMarkup: string, name: string, meta: string): DocumentFragment {
+  const fragment = document.createDocumentFragment()
+  const template = document.createElement('template')
+  template.innerHTML = iconMarkup
+  fragment.append(template.content)
+  const label = document.createElement('span')
+  label.className = 'row-name'
+  label.textContent = name
+  fragment.append(label)
+  const detail = document.createElement('span')
+  detail.className = 'row-meta'
+  detail.textContent = meta
+  fragment.append(detail)
+  return fragment
+}
+
 function appendArchiveTree(
   parent: HTMLElement,
   nodes: Map<string, ArchiveTreeNode>,
@@ -153,19 +207,32 @@ function appendArchiveTree(
   error: HTMLParagraphElement
 ): void {
   const list = document.createElement('ul')
-  const sortedNodes = [...nodes.values()].sort((left, right) => left.name.localeCompare(right.name))
+  list.className = 'tree-level'
+  const sortedNodes = [...nodes.values()].sort((left, right) => {
+    const leftDirectory = left.children.size > 0 || left.entry?.directory === true
+    const rightDirectory = right.children.size > 0 || right.entry?.directory === true
+    if (leftDirectory !== rightDirectory) return leftDirectory ? -1 : 1
+    return left.name.localeCompare(right.name)
+  })
   for (const node of sortedNodes) {
     const item = document.createElement('li')
     const isDirectory = node.children.size > 0 || node.entry?.directory === true
     if (isDirectory) {
-      const label = document.createElement('span')
-      label.textContent = node.name
-      item.append(label)
-      appendArchiveTree(item, node.children, onSelect, error)
+      const details = document.createElement('details')
+      details.className = 'tree-dir'
+      details.open = true
+      const summary = document.createElement('summary')
+      summary.className = 'tree-row'
+      const files = countFiles(node)
+      summary.append(makeRow(CHEVRON_SVG + FOLDER_SVG, node.name, `${files} ${files === 1 ? 'item' : 'items'}`))
+      details.append(summary)
+      appendArchiveTree(details, node.children, onSelect, error)
+      item.append(details)
     } else if (node.entry) {
       const button = document.createElement('button')
       button.type = 'button'
-      button.textContent = node.name
+      button.className = 'tree-row tree-file'
+      button.append(makeRow(iconFor(node.entry), node.name, formatBytes(node.entry.size)))
       button.addEventListener('click', async () => {
         if (button.disabled || !node.entry) return
         button.disabled = true
@@ -189,19 +256,62 @@ function appendArchiveTree(
 export function showProtectedArchive(
   container: HTMLElement,
   entries: readonly ProtectedEntry[],
-  onSelect: (entry: ProtectedEntry) => Promise<void>
+  onSelect: (entry: ProtectedEntry) => Promise<void>,
+  onDownloadAll?: () => Promise<'saved' | 'unsupported' | 'cancelled'>
 ): void {
+  const files = entries.filter((entry) => !entry.directory)
+  const folders = entries.length - files.length
+  const totalBytes = files.reduce((total, entry) => total + entry.size, 0)
+  const singleFile = entries.length === 1 && !entries[0]?.directory
+  const meta = singleFile
+    ? ''
+    : `${files.length} ${files.length === 1 ? 'file' : 'files'}${folders > 0 ? ` · ${folders} ${folders === 1 ? 'folder' : 'folders'}` : ''} · ${formatBytes(totalBytes)}`
   container.innerHTML = `
-    <div class="content-wrapper">
+    <div class="content-wrapper archive-view">
       <p class="eyebrow">Password-protected share</p>
-      <h1>${entries.length === 1 && !entries[0]?.directory ? 'Ready to open.' : 'Choose a file.'}</h1>
-      <div id="archive-tree" aria-label="Protected files"></div>
+      <h1>${singleFile ? 'Ready to open.' : 'Shared folder'}</h1>
+      <div class="archive-card">
+        <div class="archive-toolbar" id="archive-toolbar" hidden>
+          <p class="archive-meta" id="archive-meta"></p>
+          <button class="download-all" id="download-all" type="button" hidden>Download folder</button>
+        </div>
+        <div id="archive-tree" role="tree" aria-label="Protected files"></div>
+      </div>
       <p class="error" id="archive-error" role="alert" hidden></p>
     </div>
   `
 
-  const tree = container.querySelector('#archive-tree') as HTMLDivElement
+  const toolbar = container.querySelector('#archive-toolbar') as HTMLDivElement
+  const metaLine = container.querySelector('#archive-meta') as HTMLParagraphElement
   const error = container.querySelector('#archive-error') as HTMLParagraphElement
+  if (meta) {
+    metaLine.textContent = meta
+    toolbar.hidden = false
+  }
+  const downloadAll = container.querySelector('#download-all') as HTMLButtonElement
+  if (onDownloadAll && files.length > 0 && !singleFile) {
+    downloadAll.hidden = false
+    downloadAll.addEventListener('click', async () => {
+      if (downloadAll.disabled) return
+      downloadAll.disabled = true
+      downloadAll.textContent = 'Preparing download…'
+      error.hidden = true
+      try {
+        const result = await onDownloadAll()
+        if (result === 'unsupported') {
+          error.textContent = 'This folder is too large to download here; open the link in Chromium.'
+          error.hidden = false
+        }
+      } catch {
+        error.textContent = 'The folder could not be downloaded.'
+        error.hidden = false
+      } finally {
+        downloadAll.disabled = false
+        downloadAll.textContent = 'Download folder'
+      }
+    })
+  }
+  const tree = container.querySelector('#archive-tree') as HTMLDivElement
   if (entries.length === 0) {
     tree.textContent = 'This protected folder is empty.'
     return

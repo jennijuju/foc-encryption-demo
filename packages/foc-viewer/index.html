@@ -363,6 +363,189 @@
         border: 0;
       }
 
+      .archive-view h1 {
+        max-width: none;
+        margin: 0 0 6px;
+        font-size: clamp(1.7rem, 3vw, 2.3rem);
+        letter-spacing: -0.03em;
+        line-height: 1.1;
+      }
+
+      .archive-view .eyebrow {
+        color: var(--accent);
+        margin-bottom: 10px;
+      }
+
+      .archive-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--rule);
+      }
+
+      .archive-meta {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 650;
+        letter-spacing: 0.02em;
+      }
+
+      button.download-all {
+        flex: 0 0 auto;
+        width: auto;
+        min-height: 0;
+        margin: 0;
+        padding: 7px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--rule);
+        background: var(--surface);
+        color: var(--ink);
+        font-size: 0.82rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.download-all:hover {
+        background: var(--accent-soft);
+      }
+
+      button.download-all:disabled {
+        cursor: wait;
+        opacity: 0.6;
+      }
+
+      .archive-card {
+        margin-top: 16px;
+        border: 1px solid var(--rule);
+        border-radius: 14px;
+        background: var(--surface);
+        box-shadow: 0 14px 40px rgba(13, 27, 61, 0.08);
+        overflow: hidden;
+      }
+
+      #archive-tree {
+        padding: 8px;
+        max-height: 72vh;
+        overflow-y: auto;
+      }
+
+      #archive-tree ul.tree-level {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      #archive-tree .tree-dir > ul.tree-level {
+        margin-left: 17px;
+        padding-left: 10px;
+        border-left: 1px solid var(--rule);
+      }
+
+      .tree-row {
+        display: flex;
+        width: 100%;
+        min-height: 34px;
+        margin: 0;
+        padding: 5px 10px;
+        gap: 9px;
+        align-items: center;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--ink);
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.92rem;
+        font-weight: 500;
+        text-align: left;
+        user-select: none;
+      }
+
+      .tree-row:hover {
+        background: var(--accent-soft);
+      }
+
+      button.tree-row:disabled {
+        cursor: wait;
+        opacity: 0.55;
+      }
+
+      .tree-dir > summary.tree-row {
+        list-style: none;
+        font-weight: 700;
+      }
+
+      .tree-dir > summary.tree-row::-webkit-details-marker {
+        display: none;
+      }
+
+      .tree-row .chevron {
+        width: 14px;
+        height: 14px;
+        flex: 0 0 auto;
+        margin-right: -4px;
+        color: var(--muted);
+        transition: transform 0.12s ease;
+      }
+
+      .tree-dir[open] > summary .chevron {
+        transform: rotate(90deg);
+      }
+
+      .tree-row .row-icon {
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
+        color: var(--muted);
+      }
+
+      .tree-row .row-icon.folder {
+        color: var(--gold);
+      }
+
+      .tree-row .row-name {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .tree-row .row-meta {
+        flex: 0 0 auto;
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-variant-numeric: tabular-nums;
+      }
+
+
+      .back-bar {
+        margin: 0 0 14px;
+      }
+
+      button.back-link {
+        display: inline-block;
+        width: auto;
+        min-height: 0;
+        margin: 0;
+        padding: 7px 14px;
+        border-radius: 999px;
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        color: var(--ink);
+        font-size: 0.85rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button.back-link:hover {
+        background: var(--accent-soft);
+      }
+
+
       .download-link {
         display: inline-block;
         margin-top: 1rem;
