@@ -1,5 +1,5 @@
 import { BlobWriter, Uint8ArrayReader, ZipWriter, configure } from '@zip.js/zip.js'
-import { MAX_BINARY_PREVIEW_BYTES, MAX_DOCUMENT_PREVIEW_BYTES, readInlineEntry } from './decrypt.js'
+import { MAX_BINARY_PREVIEW_BYTES, readInlineEntry } from './decrypt.js'
 
 export interface SaveableEntry {
   readonly size: number
@@ -29,9 +29,9 @@ export async function saveEntry(entry: SaveableEntry, suggestedName: string): Pr
     return 'saved'
   }
 
-  if (entry.size > MAX_DOCUMENT_PREVIEW_BYTES) return 'unsupported'
+  if (entry.size > MAX_BINARY_PREVIEW_BYTES) return 'unsupported'
 
-  const data = await readInlineEntry(await entry.open(), entry.size)
+  const data = await readInlineEntry(await entry.open(), entry.size, MAX_BINARY_PREVIEW_BYTES)
   const objectUrl = URL.createObjectURL(new Blob([data as Uint8Array<ArrayBuffer>], { type: entry.contentType }))
   const link = document.createElement('a')
   link.href = objectUrl

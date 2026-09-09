@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { MAX_DOCUMENT_PREVIEW_BYTES } from '../src/decrypt.js'
+import { MAX_BINARY_PREVIEW_BYTES, MAX_DOCUMENT_PREVIEW_BYTES } from '../src/decrypt.js'
 import { saveEntry } from '../src/save.js'
 
 function byteStream(...chunks: Uint8Array[]): ReadableStream<Uint8Array> {
@@ -43,7 +43,7 @@ describe('saveEntry', () => {
     const open = vi.fn(async () => byteStream(new Uint8Array([1])))
 
     await expect(
-      saveEntry({ size: MAX_DOCUMENT_PREVIEW_BYTES + 1, contentType: 'application/octet-stream', open }, 'archive.bin')
+      saveEntry({ size: MAX_BINARY_PREVIEW_BYTES + 1, contentType: 'application/octet-stream', open }, 'archive.bin')
     ).resolves.toBe('unsupported')
     expect(open).not.toHaveBeenCalled()
   })

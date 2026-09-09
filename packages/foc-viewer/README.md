@@ -21,8 +21,8 @@ The viewer opens a STORE-method ZIP carried inside a seekable FEE envelope. Orig
 | Entry | Rendering |
 |---|---|
 | Self-contained HTML or text through 8 MiB | Static markup in an opaque-origin iframe; scripts, handlers, refresh, forms, embedded contexts, anchors, SVG animation, and navigation/resource URLs are removed |
-| Image, PDF, audio, or video through 64 MiB | Inline browser preview with an explicit download action |
-| Any larger entry below 1000 MiB | Explicit authenticated Chromium save through the File System Access API; other browsers show the compatibility message |
+| Image, PDF, audio, or video through 256 MiB | Inline browser preview with an explicit download action |
+| Any larger entry below 1000 MiB | Explicit authenticated Chromium save through the File System Access API; other browsers can save any single entry through 256 MiB via an in-memory download and show the compatibility message above that |
 
 The viewer determines these caps from a bounded sniff of decrypted bytes, not the filename. Content above 8 MiB receives the binary preview allowance only when its signature identifies a supported image, PDF, audio, or video type; otherwise it goes directly to download.
 

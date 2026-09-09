@@ -1,5 +1,5 @@
 export const MAX_DOCUMENT_PREVIEW_BYTES = 8 * 1024 * 1024
-export const MAX_BINARY_PREVIEW_BYTES = 64 * 1024 * 1024
+export const MAX_BINARY_PREVIEW_BYTES = 256 * 1024 * 1024
 
 export async function readInlineEntry(
   stream: ReadableStream<Uint8Array>,
